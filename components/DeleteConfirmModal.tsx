@@ -1,0 +1,48 @@
+import React from 'react';
+import { Trash2, X, Loader2 } from 'lucide-react';
+import { Language, translations } from '../i18n';
+
+interface DeleteConfirmModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  onConfirm: () => void;
+  language: Language;
+  itemName?: string;
+  isDeleting?: boolean;
+  title?: string;
+  description?: string;
+}
+
+export const DeleteConfirmModal: React.FC<DeleteConfirmModalProps> = ({ 
+    isOpen, onClose, onConfirm, language, itemName, isDeleting, title, description 
+}) => {
+  const t = translations[language];
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in-up">
+        <div className="bg-white p-8 rounded-2xl shadow-2xl border border-gray-100 max-w-sm w-full text-center">
+            <div className="w-16 h-16 bg-red-100 text-red-600 rounded-full flex items-center justify-center mx-auto mb-4">
+                <Trash2 size={32} />
+            </div>
+            <h3 className="text-xl font-bold text-gray-900 mb-2">{title || t.delete}</h3>
+            {itemName && <p className="text-gray-800 font-medium text-sm mb-2 px-4 truncate">{itemName}</p>}
+            {description && <p className="text-gray-500 mb-8 text-sm">{description}</p>}
+            <div className="flex gap-3">
+                <button onClick={onClose} className="flex-1 py-3 bg-gray-100 text-gray-700 font-bold rounded-xl hover:bg-gray-200 transition-colors text-sm">
+                    {t.cancel}
+                </button>
+                <button 
+                    onClick={onConfirm} 
+                    disabled={isDeleting}
+                    className="flex-1 py-3 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition-colors shadow-lg shadow-red-200 text-sm flex items-center justify-center"
+                >
+                    {isDeleting ? <Loader2 size={16} className="animate-spin mr-2"/> : null}
+                    {t.delete}
+                </button>
+            </div>
+        </div>
+    </div>
+  );
+};
