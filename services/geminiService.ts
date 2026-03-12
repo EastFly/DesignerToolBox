@@ -9,41 +9,51 @@ export const MODELS: Record<string, AiModelType> = {
 };
 
 /**
- * Safely retrieves the API key from various possible sources.
- * Prioritizes hardcoded env, then runtime injected env, then platform dialog.
+ * Safely retrieves the API key.
  */
 export async function getApiKey(): Promise<string> {
-    // 1. Try GEMINI_API_KEY (usually from .env via Vite define)
-    let apiKey = (process.env.GEMINI_API_KEY as string) || '';
+    let key = '';
     
-    // 2. Try dynamic process.env.API_KEY (platform injected)
-    // We use a safe check to avoid ReferenceError in browser
-    if (!apiKey) {
+    // 1. Try Vite's import.meta.env (if user used VITE_ prefix)
+    try {
+        key = import.meta.env.VITE_GEMINI_API_KEY || import.meta.env.VITE_API_KEY || '';
+    } catch (e) {}
+
+    // 2. Try statically replaced process.env (from vite.config.ts define)
+    if (!key) {
         try {
             // @ts-ignore
-            apiKey = window.process?.env?.GEMINI_API_KEY || window.process?.env?.API_KEY || '';
+            if (typeof process !== 'undefined' && process.env) {
+                key = process.env.GEMINI_API_KEY || process.env.API_KEY || '';
+            }
         } catch (e) {}
     }
 
-    // 3. Fallback to platform selection dialog
-    if (!apiKey && typeof window !== 'undefined' && (window as any).aistudio) {
-        const aistudio = (window as any).aistudio;
+    // 3. Fallback for direct Vite replacement if process is undefined
+    if (!key) {
         try {
-            if (await aistudio.hasSelectedApiKey()) {
-                // Re-check after selection
-                // @ts-ignore
-                apiKey = window.process?.env?.GEMINI_API_KEY || window.process?.env?.API_KEY || '';
-            } else {
-                await aistudio.openSelectKey();
-                // @ts-ignore
-                apiKey = window.process?.env?.GEMINI_API_KEY || window.process?.env?.API_KEY || '';
-            }
-        } catch (e) {
-            console.error("Key selection failed", e);
-        }
+            // @ts-ignore
+            key = process.env.GEMINI_API_KEY || '';
+        } catch (e) {}
     }
-    
-    return apiKey;
+    if (!key) {
+        try {
+            // @ts-ignore
+            key = process.env.API_KEY || '';
+        } catch (e) {}
+    }
+
+    // 4. Try dynamic window access (bypasses Vite's static replacement for runtime injection)
+    if (!key) {
+        try {
+            const win = window as any;
+            if (win && win.process && win.process.env) {
+                key = win.process.env.GEMINI_API_KEY || win.process.env.API_KEY || '';
+            }
+        } catch (e) {}
+    }
+
+    return key;
 }
 
 /**
@@ -58,19 +68,9 @@ export async function createAIInstance() {
 }
 
 /**
- * Handles common Gemini errors, specifically key-related ones.
+ * Handles common Gemini errors.
  */
 export async function handleGeminiError(error: any) {
     console.error("Gemini API Error:", error);
-    const msg = error.message || "";
-    
-    // If key is invalid or not found, prompt for selection
-    if (msg.includes("Requested entity was not found") || 
-        msg.includes("API key not found") || 
-        msg.includes("invalid API key")) {
-        if (typeof window !== 'undefined' && (window as any).aistudio) {
-            await (window as any).aistudio.openSelectKey();
-        }
-    }
     throw error;
 }

@@ -130,7 +130,7 @@ export const OperatorToolboxView: React.FC<OperatorToolboxViewProps> = ({ langua
         if (!sopFile) return;
         const apiKey = await getApiKey();
         if (!apiKey) {
-            alert("API Key required");
+            alert("API Key is missing. Please ensure GEMINI_API_KEY is set in your environment.");
             return;
         }
 

@@ -780,7 +780,7 @@ export const PromptBuilderView: React.FC<PromptBuilderViewProps> = ({ language, 
 
   const executeGraph = async () => {
       const apiKey = await getApiKey(); 
-      if (!apiKey) { alert("API_KEY missing"); return; }
+      if (!apiKey) { alert("API Key is missing. Please ensure GEMINI_API_KEY is set in your environment."); return; }
       const ai = new GoogleGenAI({ apiKey });
 
       const startNode = nodes.find(n => n.type === 'start');

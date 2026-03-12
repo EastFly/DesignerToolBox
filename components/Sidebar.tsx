@@ -78,6 +78,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <MenuItem view="prompt_builder" icon={Workflow} label={t.prompt_builder} disabled={!canManagePrompts} />
             <MenuItem view="archived" icon={Archive} label={t.archivedTasks} />
         </div>
+
+        {/* Bottom Section */}
+        <div className="p-4 border-t border-gray-200 mt-auto">
+            <div className="flex items-center justify-center text-[10px] text-gray-400 font-mono">
+                Build 20260306.2126
+            </div>
+        </div>
     </div>
   );
 };
