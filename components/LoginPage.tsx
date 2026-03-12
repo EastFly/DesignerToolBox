@@ -114,15 +114,14 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin, currentLanguage }
                         <div className="w-12 h-12 bg-white/20 rounded-xl flex items-center justify-center mb-6">
                             <LayoutGrid size={24} className="text-white" />
                         </div>
-                        <h1 className="text-3xl font-bold mb-2">{t.appTitle}</h1>
+                        <div className="flex items-center gap-2 mb-2">
+                            <h1 className="text-3xl font-bold">{t.appTitle}</h1>
+                            <span className="bg-white/20 text-white text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider">Beta</span>
+                        </div>
                         <p className="text-indigo-200">{t.subtitle}</p>
                     </div>
                     <div className="space-y-4">
-                        <div className="bg-white/10 p-4 rounded-lg backdrop-blur-sm">
-                            <h3 className="font-semibold text-sm mb-1">{t.collaborationReady}</h3>
-                            <p className="text-xs text-indigo-100 opacity-80">{t.realTimeSync}</p>
-                        </div>
-                        <p className="text-xs text-indigo-300">{t.version}</p>
+                        {/* Removed Collaboration Ready block */}
                     </div>
                 </div>
 

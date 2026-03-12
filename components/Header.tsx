@@ -252,6 +252,10 @@ export const Header: React.FC<HeaderProps> = ({
 
       <div className="flex items-center space-x-6">
         
+        <div className="text-[10px] text-gray-400 font-mono bg-gray-50 px-2 py-1 rounded border border-gray-100 hidden md:block" title="Current Build Version">
+          Build: {new Date().toISOString().split('T')[0].replace(/-/g, '')}.{new Date().getHours().toString().padStart(2, '0')}
+        </div>
+
         <div className={`flex items-center space-x-1.5 px-2 py-1 rounded-full text-xs font-medium border ${
             connectionStatus === 'CONNECTED' 
             ? 'bg-green-50 text-green-700 border-green-200' 

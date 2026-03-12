@@ -10,23 +10,43 @@ export const USERS: User[] = [
   { id: 'u5', name: 'Eve', role: 'Designer', avatar: 'https://i.pravatar.cc/150?u=u5' },
 ];
 
-export const AVAILABLE_PERMISSIONS: {key: Permission, label: string}[] = [
-  { key: 'task.create', label: 'Create Tasks' },
-  { key: 'task.edit', label: 'Edit Content (Fields, Requirements)' },
-  { key: 'task.edit_core', label: 'Edit Core Props (Dates, Priority, Assignee)' }, 
-  { key: 'task.move', label: 'Move Task Stage' },
-  { key: 'task.delete', label: 'Delete Tasks' },
-  { key: 'task.view_all', label: 'View All Tasks (Uncheck to restrict to own)' },
-  { key: 'assets.upload', label: 'Upload Assets' },
-  { key: 'settings.manage', label: 'Manage Settings & Roles' },
-  { key: 'users.approve', label: 'Approve New Users' },
-  { key: 'stats.view', label: 'View Statistics Dashboard' },
-  { key: 'prompt.manage', label: 'Manage Prompt Builder' }, // Added label
-  { key: 'products.manage', label: 'Manage Products' }, // Added
-  { key: 'playground.access', label: 'Access Playground' },
-  { key: 'dicestorm.access', label: 'Access Dice Storm' },
-  { key: 'midnight.access', label: 'Access Midnight Missions' },
-  { key: 'dice.manage_global', label: 'Manage Global Style Dice' },
+export const AVAILABLE_PERMISSIONS: {key: Permission, label: string, group: string}[] = [
+  // Task Management
+  { key: 'task.create', label: 'Create Tasks', group: 'Task Management' },
+  { key: 'task.edit', label: 'Edit Content (Fields, Requirements)', group: 'Task Management' },
+  { key: 'task.edit_core', label: 'Edit Core Props (Dates, Priority, Assignee)', group: 'Task Management' }, 
+  { key: 'task.move', label: 'Move Task Stage', group: 'Task Management' },
+  { key: 'task.delete', label: 'Delete Tasks', group: 'Task Management' },
+  { key: 'task.view_all', label: 'View All Tasks (Uncheck to restrict to own)', group: 'Task Management' },
+  { key: 'assets.upload', label: 'Upload Assets', group: 'Task Management' },
+  
+  // Sidebar Features
+  { key: 'dashboard.access', label: 'Access Dashboard', group: 'Sidebar Access' },
+  { key: 'projects.access', label: 'Access Projects', group: 'Sidebar Access' },
+  { key: 'playground.access', label: 'Access Playground', group: 'Sidebar Access' },
+  { key: 'xlab.access', label: 'Access X Lab', group: 'Sidebar Access' },
+  { key: 'dice.access', label: 'Access Dice Management', group: 'Sidebar Access' },
+  { key: 'dicestorm.access', label: 'Access Dice Storm', group: 'Sidebar Access' },
+  { key: 'midnight.access', label: 'Access Midnight Missions', group: 'Sidebar Access' },
+  { key: 'analytics.access', label: 'Access Analytics', group: 'Sidebar Access' },
+  { key: 'settings.access', label: 'Access Settings', group: 'Sidebar Access' },
+
+  // System Features
+  { key: 'users.approve', label: 'Approve New Users', group: 'System Features' },
+  { key: 'stats.view', label: 'View Statistics Dashboard', group: 'System Features' },
+  { key: 'prompt.manage', label: 'Manage Prompt Builder', group: 'System Features' },
+  { key: 'products.manage', label: 'Manage Products', group: 'System Features' },
+  { key: 'dice.manage_global', label: 'Manage Global Style Dice', group: 'System Features' },
+
+  // Settings Tabs
+  { key: 'settings.manage', label: 'Master Settings Access', group: 'Settings Tabs' },
+  { key: 'settings.task_types', label: 'Configure Task Types', group: 'Settings Tabs' },
+  { key: 'settings.global_fields', label: 'Configure Global Fields', group: 'Settings Tabs' },
+  { key: 'settings.global_stages', label: 'Configure Global Stages', group: 'Settings Tabs' },
+  { key: 'settings.roles', label: 'Manage Roles', group: 'Settings Tabs' },
+  { key: 'settings.users', label: 'Manage Users', group: 'Settings Tabs' },
+  { key: 'settings.system', label: 'System Maintenance', group: 'Settings Tabs' },
+  { key: 'settings.model_usage', label: 'View Model Usage', group: 'Settings Tabs' },
 ];
 
 // --- VALUE CALCULATION COEFFICIENTS ---
@@ -43,6 +63,8 @@ export const DIFFICULTY_WEIGHTS = {
     'Low': 0.8
 };
 
+export const BUILD_VERSION = '2026.03.11.03';
+
 export const INITIAL_ROLES: RoleDef[] = [
   { 
     id: 'Admin',
@@ -50,7 +72,9 @@ export const INITIAL_ROLES: RoleDef[] = [
     permissions: [
       'task.create', 'task.edit', 'task.edit_core', 'task.move', 'task.delete', 'task.view_all', 
       'assets.upload', 'settings.manage', 'users.approve', 'stats.view', 'prompt.manage', 
-      'products.manage', 'playground.access', 'dicestorm.access', 'midnight.access', 'dice.manage_global'
+      'products.manage', 'playground.access', 'xlab.access', 'dicestorm.access', 'midnight.access', 'dice.manage_global',
+      'dashboard.access', 'projects.access', 'dice.access', 'analytics.access', 'settings.access',
+      'settings.task_types', 'settings.global_fields', 'settings.global_stages', 'settings.roles', 'settings.users', 'settings.system', 'settings.model_usage'
     ],
     isSystem: true
   },
@@ -59,7 +83,8 @@ export const INITIAL_ROLES: RoleDef[] = [
     name: 'Product Director', 
     permissions: [
       'task.create', 'task.edit', 'task.edit_core', 'task.move', 'task.delete', 'task.view_all', 
-      'assets.upload', 'stats.view', 'products.manage', 'playground.access', 'dicestorm.access', 'midnight.access'
+      'assets.upload', 'stats.view', 'products.manage', 'playground.access', 'xlab.access', 'dicestorm.access', 'midnight.access',
+      'dashboard.access', 'projects.access', 'dice.access', 'analytics.access'
     ],
     isSystem: true 
   },
@@ -68,7 +93,8 @@ export const INITIAL_ROLES: RoleDef[] = [
     name: 'Operations', 
     permissions: [
       'task.edit', 'task.edit_core', 'task.move', 'task.view_all', 'assets.upload', 
-      'users.approve', 'stats.view', 'products.manage'
+      'users.approve', 'stats.view', 'products.manage',
+      'dashboard.access', 'projects.access', 'analytics.access'
     ],
     isSystem: true 
   },
@@ -77,15 +103,23 @@ export const INITIAL_ROLES: RoleDef[] = [
     name: 'Design Director', 
     permissions: [
       'task.edit', 'task.edit_core', 'task.move', 'task.view_all', 'assets.upload', 
-      'settings.manage', 'stats.view', 'prompt.manage', 'playground.access', 'dicestorm.access', 
-      'midnight.access', 'dice.manage_global'
+      'settings.manage', 'stats.view', 'prompt.manage', 'playground.access', 'xlab.access', 'dicestorm.access', 
+      'midnight.access', 'dice.manage_global',
+      'dashboard.access', 'projects.access', 'dice.access', 'analytics.access', 'settings.access',
+      'settings.task_types', 'settings.global_fields', 'settings.global_stages'
     ],
     isSystem: true 
   },
   { 
     id: 'Designer', 
     name: 'Designer', 
-    permissions: ['task.move', 'task.view_all', 'assets.upload', 'playground.access', 'dicestorm.access'], 
+    permissions: ['task.move', 'task.view_all', 'assets.upload', 'playground.access', 'xlab.access', 'dicestorm.access', 'dashboard.access', 'projects.access', 'dice.access'], 
+    isSystem: true 
+  },
+  { 
+    id: 'Viewer', 
+    name: 'Viewer', 
+    permissions: ['task.view_all', 'dashboard.access', 'projects.access'],
     isSystem: true 
   }
 ];

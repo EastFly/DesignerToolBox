@@ -59,9 +59,24 @@ export type Permission =
   | 'prompt.manage'   // Manage Prompt Flows
   | 'products.manage' // Manage Products
   | 'playground.access' // Access Playground
+  | 'xlab.access'       // Access X Lab
   | 'dicestorm.access'  // Access Dice Storm
   | 'midnight.access'   // Access Midnight Missions
-  | 'dice.manage_global'; // Manage Global Style Dice
+  | 'dice.manage_global' // Manage Global Style Dice
+  // Sidebar Access
+  | 'dashboard.access'
+  | 'projects.access'
+  | 'dice.access'
+  | 'analytics.access'
+  | 'settings.access'
+  // Settings Tabs
+  | 'settings.task_types'
+  | 'settings.global_fields'
+  | 'settings.global_stages'
+  | 'settings.roles'
+  | 'settings.users'
+  | 'settings.system'
+  | 'settings.model_usage';
 
 export interface RoleDef {
   id: string;
@@ -173,7 +188,7 @@ export type PromptNodeType = 'start' | 'generation';
 
 // Updated Model Types to include Veo and Flash variants
 export type AiModelType = 
-  | 'gemini-3.1-pro-preview' 
+  | 'gemini-3-pro-preview' 
   | 'gemini-3-flash-preview'
   | 'gemini-3-pro-image-preview' 
   | 'gemini-2.5-flash-image'
@@ -297,9 +312,10 @@ export interface AssetMetadata {
 // Shared GenConfig for Playground/Dice
 // UPDATED V2.15: Added targetLanguage and fontStyle
 export interface GenConfig {
+    model?: string;
     aspectRatio: string;
     allowText: boolean;
-    resolution: '1K' | '2K';
+    resolution: '1K' | '2K' | '4K' | '512px';
     targetLanguage?: string;
     fontStyle?: string;
     layoutConsistency?: number; // 0-100

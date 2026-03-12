@@ -1,8 +1,8 @@
 
 // ... existing imports ...
-import { Task, TaskTypeConfig, User, RoleDef, FullUserProfile, ProfileStatus, StageDef, FieldDefinition, PromptFlow, Product, ProductChangeLog, LifecycleStatus, StyleDice, MidnightMission } from '../types';
+import { Task, TaskTypeConfig, User, RoleDef, FullUserProfile, ProfileStatus, StageDef, FieldDefinition, PromptFlow, Product, ProductChangeLog, LifecycleStatus, StyleDice, MidnightMission, Permission } from '../types';
 import { INITIAL_TASKS, INITIAL_TASK_TYPES, INITIAL_ROLES, INITIAL_STAGES, INITIAL_FIELDS } from '../constants';
-import { supabase, BUCKET_NAME, TABLE_TASKS, TABLE_TYPES, TABLE_PROFILES, TABLE_ROLES, TABLE_PRODUCTS, TABLE_STYLE_DICE, TABLE_MIDNIGHT_MISSIONS } from './supabase';
+import { supabase, BUCKET_NAME, TABLE_TASKS, TABLE_TYPES, TABLE_PROFILES, TABLE_ROLES, TABLE_PRODUCTS, TABLE_STYLE_DICE, TABLE_MIDNIGHT_MISSIONS, TABLE_MODEL_USAGE } from './supabase';
 import { compressImage } from '../utils/imageCompression';
 
 // We will use a special table 'system_settings' or reuse 'task_types' with a reserved ID for global config to keep it simple
@@ -13,6 +13,53 @@ export type ConnectionStatus = 'CONNECTED' | 'MISSING_TABLES' | 'RLS_ERROR' | 'O
 
 class DatabaseService {
   
+  // --- Model Usage ---
+  async logModelUsage(module: string, modelName: string, parameters: any): Promise<void> {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const { error } = await supabase.from(TABLE_MODEL_USAGE).insert({
+        user_id: user.id,
+        module,
+        model_name: modelName,
+        parameters,
+        created_at: new Date().toISOString()
+      });
+
+      if (error) {
+        console.error('Error logging model usage:', error);
+      }
+    } catch (err) {
+      console.error('Failed to log model usage:', err);
+    }
+  }
+
+  async getModelUsageStats(): Promise<any[]> {
+    try {
+      const { data: usageData, error: usageError } = await supabase.from(TABLE_MODEL_USAGE)
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (usageError) throw usageError;
+
+      const { data: profilesData, error: profilesError } = await supabase.from('profiles')
+        .select('id, email, full_name');
+        
+      if (profilesError) throw profilesError;
+
+      const profilesMap = new Map((profilesData || []).map(p => [p.id, p]));
+
+      return (usageData || []).map(usage => ({
+        ...usage,
+        profiles: profilesMap.get(usage.user_id) || null
+      }));
+    } catch (err) {
+      console.error('Failed to fetch model usage stats:', err);
+      return [];
+    }
+  }
+
   // Check if we can connect and if tables exist/have permissions
   async checkConnection(): Promise<ConnectionStatus> {
     try {
@@ -465,7 +512,7 @@ class DatabaseService {
           const { data, error } = await supabase.from(TABLE_ROLES).select('*');
           if (error || !data.length) return INITIAL_ROLES;
           return data.map((r: any) => ({
-              id: r.id, name: r.name, permissions: r.permissions, isSystem: r.is_system
+              id: r.id, name: r.name, permissions: r.permissions || [], isSystem: r.is_system
           }));
       } catch (e) { return INITIAL_ROLES; }
   }

@@ -4,6 +4,7 @@ import { Bot, Send, Sparkles, Loader2, Image as ImageIcon, FileText, CheckCircle
 import { GoogleGenAI } from "@google/genai";
 import { Product, ProductSpec, CompetitorAnalysis } from '../types';
 import { db } from '../services/db';
+import { Language, translations } from '../i18n';
 
 interface ProductCopilotProps {
     productName: string;
@@ -13,6 +14,7 @@ interface ProductCopilotProps {
     onApplyImages: (urls: string[]) => void;
     onApplySmartImport?: (data: any) => void; // New
     onClose: () => void;
+    language: Language;
 }
 
 interface Message {
@@ -23,13 +25,12 @@ interface Message {
     data?: any;
 }
 
-import { getApiKey } from '../services/geminiService';
-
 export const ProductCopilot: React.FC<ProductCopilotProps> = ({ 
-    productName, productData, onApplySpecs, onApplyCompetitor, onApplyImages, onApplySmartImport, onClose 
+    productName, productData, onApplySpecs, onApplyCompetitor, onApplyImages, onApplySmartImport, onClose, language 
 }) => {
+    const t = translations[language];
     const [messages, setMessages] = useState<Message[]>([
-        { id: '1', role: 'ai', content: `Hello! I'm your Product Assistant for "${productName}".\n\nUpload a PDF/Image to **Import Data**, paste a URL for **Competitor Analysis**, or ask me to help with Specs.`, type: 'text' }
+        { id: '1', role: 'ai', content: t.pm_copilot_greeting.replace('{productName}', productName), type: 'text' }
     ]);
     const [input, setInput] = useState('');
     const [isThinking, setIsThinking] = useState(false);
@@ -80,6 +81,35 @@ export const ProductCopilot: React.FC<ProductCopilotProps> = ({
         setPendingFile(null);
     };
 
+    const getApiKey = async () => {
+        let apiKey = '';
+        try {
+            apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY || '';
+        } catch (e) {
+            try {
+                apiKey = process.env.API_KEY || '';
+            } catch (e2) {
+                apiKey = '';
+            }
+        }
+        // @ts-ignore
+        if (!apiKey && typeof window !== 'undefined' && window.aistudio) {
+            // @ts-ignore
+            if (await window.aistudio.hasSelectedApiKey()) {
+                apiKey = process.env.API_KEY || '';
+            } else {
+                try {
+                    // @ts-ignore
+                    await window.aistudio.openSelectKey();
+                    apiKey = process.env.API_KEY || '';
+                } catch (e) {
+                    return null;
+                }
+            }
+        }
+        return apiKey;
+    };
+
     const handleSend = async () => {
         if (!input.trim() && !pendingFile) return;
         
@@ -107,6 +137,11 @@ export const ProductCopilot: React.FC<ProductCopilotProps> = ({
             }
 
             const apiKey = await getApiKey();
+            if (!apiKey) {
+                alert(t.pm_copilot_api_required);
+                setIsThinking(false);
+                return;
+            }
             const ai = new GoogleGenAI({ apiKey });
 
             // Extract Core Assets from Data for Context
@@ -182,6 +217,8 @@ export const ProductCopilot: React.FC<ProductCopilotProps> = ({
                 }
             });
 
+            db.logModelUsage('ProductCopilot', 'gemini-3-flash-preview', { type: 'chat', config: { systemInstruction: '...' } }).catch(console.error);
+
             const reply = response.text || '';
             const jsonMatch = reply.match(/```json\n([\s\S]*?)\n```/);
             
@@ -214,7 +251,7 @@ export const ProductCopilot: React.FC<ProductCopilotProps> = ({
 
         } catch (e) {
             console.error(e);
-            setMessages(prev => [...prev, { id: Date.now().toString(), role: 'ai', content: "Sorry, something went wrong.", type: 'text' }]);
+            setMessages(prev => [...prev, { id: Date.now().toString(), role: 'ai', content: t.pm_copilot_error, type: 'text' }]);
         } finally {
             setIsThinking(false);
         }
@@ -226,8 +263,8 @@ export const ProductCopilot: React.FC<ProductCopilotProps> = ({
                 <div className="flex items-center gap-2">
                     <div className="bg-indigo-600 p-1.5 rounded-lg text-white"><Bot size={18}/></div>
                     <div>
-                        <h3 className="font-bold text-gray-800 text-sm">Product Copilot</h3>
-                        <p className="text-[10px] text-indigo-500 font-medium">Context: {productName}</p>
+                        <h3 className="font-bold text-gray-800 text-sm">{t.pm_copilot_title}</h3>
+                        <p className="text-[10px] text-indigo-500 font-medium">{t.pm_copilot_context} {productName}</p>
                     </div>
                 </div>
                 <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={18}/></button>
@@ -243,17 +280,17 @@ export const ProductCopilot: React.FC<ProductCopilotProps> = ({
                             {msg.type === 'smart_import_proposal' && msg.data && (
                                 <div className="mt-2 bg-slate-50 rounded border border-slate-200 p-3 text-xs">
                                     <div className="font-bold text-indigo-700 mb-2 flex items-center gap-2 border-b border-slate-200 pb-2">
-                                        <FileJson size={14}/> Smart Import Data
+                                        <FileJson size={14}/> {t.pm_copilot_smart_import_data}
                                     </div>
                                     <div className="space-y-2 mb-3">
-                                        <div><span className="text-gray-400">Name:</span> <span className="font-bold text-gray-800">{msg.data.name}</span></div>
-                                        <div><span className="text-gray-400">SKU:</span> <span className="font-mono text-gray-700">{msg.data.sku}</span></div>
-                                        <div><span className="text-gray-400">Specs:</span> <span className="text-gray-600">{msg.data.specs?.length || 0} items</span></div>
-                                        <div><span className="text-gray-400">Sell Points:</span> <span className="text-gray-600">{msg.data.sellingPoints?.length || 0} items</span></div>
+                                        <div><span className="text-gray-400">{t.pm_copilot_name}</span> <span className="font-bold text-gray-800">{msg.data.name}</span></div>
+                                        <div><span className="text-gray-400">{t.pm_copilot_sku}</span> <span className="font-mono text-gray-700">{msg.data.sku}</span></div>
+                                        <div><span className="text-gray-400">{t.pm_copilot_specs}</span> <span className="text-gray-600">{msg.data.specs?.length || 0} {t.pm_copilot_items}</span></div>
+                                        <div><span className="text-gray-400">{t.pm_copilot_sell_points}</span> <span className="text-gray-600">{msg.data.sellingPoints?.length || 0} {t.pm_copilot_items}</span></div>
                                     </div>
                                     {onApplySmartImport && (
                                         <button onClick={() => onApplySmartImport(msg.data)} className="w-full py-2 bg-indigo-600 text-white rounded font-bold hover:bg-indigo-700 flex items-center justify-center gap-1 transition-colors">
-                                            <Eye size={12}/> Review & Apply
+                                            <Eye size={12}/> {t.pm_copilot_review_apply}
                                         </button>
                                     )}
                                 </div>
@@ -263,7 +300,7 @@ export const ProductCopilot: React.FC<ProductCopilotProps> = ({
                             {msg.type === 'specs_proposal' && msg.data && (
                                 <div className="mt-2 bg-slate-50 rounded border border-slate-200 p-2 text-xs">
                                     <div className="font-bold text-slate-500 mb-2 flex items-center justify-between">
-                                        <span className="flex items-center gap-1"><Table size={12}/> Extracted Specs</span>
+                                        <span className="flex items-center gap-1"><Table size={12}/> {t.pm_copilot_extracted_specs}</span>
                                         <button onClick={() => updateMessageData(msg.id, [...msg.data, { label: "", value: "" }])} className="text-indigo-600 hover:text-indigo-700 bg-indigo-50 p-1 rounded"><Plus size={10}/></button>
                                     </div>
                                     <div className="space-y-1 mb-3 max-h-48 overflow-y-auto custom-scrollbar">
@@ -276,7 +313,7 @@ export const ProductCopilot: React.FC<ProductCopilotProps> = ({
                                         ))}
                                     </div>
                                     <button onClick={() => onApplySpecs(msg.data.filter((s:any) => s.label && s.value))} className="w-full py-1.5 bg-indigo-600 text-white rounded font-bold hover:bg-indigo-700 flex items-center justify-center gap-1 transition-colors">
-                                        <CheckCircle size={12}/> Apply Specs
+                                        <CheckCircle size={12}/> {t.pm_copilot_apply_specs}
                                     </button>
                                 </div>
                             )}
@@ -284,17 +321,17 @@ export const ProductCopilot: React.FC<ProductCopilotProps> = ({
                             {/* COMPETITOR PROPOSAL */}
                             {msg.type === 'competitor_proposal' && msg.data && (
                                 <div className="mt-2 bg-slate-50 rounded border border-slate-200 p-2 text-xs space-y-2">
-                                    <div className="font-bold text-slate-500 flex items-center gap-1"><Target size={12}/> Competitor Analysis</div>
-                                    <div><label className="text-[10px] text-gray-400 uppercase font-bold">Name</label><input className="w-full p-1 border border-slate-200 rounded text-xs bg-white mb-1" value={msg.data.name} onChange={(e) => updateMessageData(msg.id, { ...msg.data, name: e.target.value })}/></div>
-                                    <div><label className="text-[10px] text-gray-400 uppercase font-bold">Summary</label><textarea className="w-full p-1 border border-slate-200 rounded text-xs bg-white mb-1" rows={2} value={msg.data.summary} onChange={(e) => updateMessageData(msg.id, { ...msg.data, summary: e.target.value })}/></div>
+                                    <div className="font-bold text-slate-500 flex items-center gap-1"><Target size={12}/> {t.pm_copilot_competitor_analysis}</div>
+                                    <div><label className="text-[10px] text-gray-400 uppercase font-bold">{t.pm_copilot_comp_name}</label><input className="w-full p-1 border border-slate-200 rounded text-xs bg-white mb-1" value={msg.data.name} onChange={(e) => updateMessageData(msg.id, { ...msg.data, name: e.target.value })}/></div>
+                                    <div><label className="text-[10px] text-gray-400 uppercase font-bold">{t.pm_copilot_comp_summary}</label><textarea className="w-full p-1 border border-slate-200 rounded text-xs bg-white mb-1" rows={2} value={msg.data.summary} onChange={(e) => updateMessageData(msg.id, { ...msg.data, summary: e.target.value })}/></div>
                                     
                                     {/* Expanded Details */}
                                     <div className="grid grid-cols-2 gap-2">
-                                        <div><label className="text-[10px] text-gray-400 uppercase font-bold">Target Audience</label><input className="w-full p-1 border border-slate-200 rounded text-xs bg-white" value={msg.data.target_audience || ''} onChange={(e) => updateMessageData(msg.id, { ...msg.data, target_audience: e.target.value })}/></div>
-                                        <div><label className="text-[10px] text-gray-400 uppercase font-bold">Price Range</label><input className="w-full p-1 border border-slate-200 rounded text-xs bg-white" value={msg.data.price_range || ''} onChange={(e) => updateMessageData(msg.id, { ...msg.data, price_range: e.target.value })}/></div>
+                                        <div><label className="text-[10px] text-gray-400 uppercase font-bold">{t.pm_copilot_comp_target}</label><input className="w-full p-1 border border-slate-200 rounded text-xs bg-white" value={msg.data.target_audience || ''} onChange={(e) => updateMessageData(msg.id, { ...msg.data, target_audience: e.target.value })}/></div>
+                                        <div><label className="text-[10px] text-gray-400 uppercase font-bold">{t.pm_copilot_comp_price}</label><input className="w-full p-1 border border-slate-200 rounded text-xs bg-white" value={msg.data.price_range || ''} onChange={(e) => updateMessageData(msg.id, { ...msg.data, price_range: e.target.value })}/></div>
                                     </div>
 
-                                    <button onClick={() => onApplyCompetitor(msg.data)} className="w-full py-1.5 bg-indigo-600 text-white rounded font-bold hover:bg-indigo-700 flex items-center justify-center gap-1 transition-colors mt-2"><CheckCircle size={12}/> Add Competitor</button>
+                                    <button onClick={() => onApplyCompetitor(msg.data)} className="w-full py-1.5 bg-indigo-600 text-white rounded font-bold hover:bg-indigo-700 flex items-center justify-center gap-1 transition-colors mt-2"><CheckCircle size={12}/> {t.pm_copilot_add_competitor}</button>
                                 </div>
                             )}
                         </div>
@@ -304,7 +341,7 @@ export const ProductCopilot: React.FC<ProductCopilotProps> = ({
                     <div className="flex justify-start">
                         <div className="bg-white border border-gray-200 rounded-2xl rounded-bl-none px-4 py-3 flex items-center gap-2 shadow-sm">
                             <Loader2 size={16} className="animate-spin text-indigo-600"/>
-                            <span className="text-xs text-gray-500">{uploading ? 'Processing file...' : 'Thinking...'}</span>
+                            <span className="text-xs text-gray-500">{uploading ? t.pm_copilot_processing : t.pm_copilot_thinking}</span>
                         </div>
                     </div>
                 )}
@@ -329,7 +366,7 @@ export const ProductCopilot: React.FC<ProductCopilotProps> = ({
                     </div>
                     <div className="flex-1 min-w-0">
                         <div className="text-xs font-bold text-gray-700 truncate">{pendingFile.file.name}</div>
-                        <div className="text-[10px] text-gray-400">Attached - ready to send</div>
+                        <div className="text-[10px] text-gray-400">{t.pm_copilot_attached}</div>
                     </div>
                 </div>
             )}
@@ -348,7 +385,7 @@ export const ProductCopilot: React.FC<ProductCopilotProps> = ({
                     </label>
                     <input 
                         className="flex-1 border border-gray-300 rounded-xl pl-4 pr-10 py-3 text-sm focus:ring-2 focus:ring-indigo-500 outline-none shadow-sm"
-                        placeholder="Ask me to extract data, analyze competitors..."
+                        placeholder={t.pm_copilot_placeholder}
                         value={input}
                         onChange={e => setInput(e.target.value)}
                         onKeyDown={e => e.key === 'Enter' && handleSend()}

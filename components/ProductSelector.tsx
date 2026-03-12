@@ -2,6 +2,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Search, X, Check, ChevronDown } from 'lucide-react';
 import { Product } from '../types';
+import { translations } from '../i18n';
 
 interface ProductSelectorProps {
     products: Product[];
@@ -11,17 +12,20 @@ interface ProductSelectorProps {
     label?: string | React.ReactNode;
     disabled?: boolean;
     className?: string;
+    language?: string;
 }
 
 export const ProductSelector: React.FC<ProductSelectorProps> = ({ 
-    products, selectedProductId, onSelect, placeholder = "Select product...", label, disabled, className
+    products, selectedProductId, onSelect, placeholder, label, disabled, className, language = 'en'
 }) => {
     const [isOpen, setIsOpen] = useState(false);
     const [search, setSearch] = useState('');
     const wrapperRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLInputElement>(null);
+    const t = translations[language as keyof typeof translations] || translations.en;
 
     const selectedProduct = products.find(p => p.id === selectedProductId);
+    const displayPlaceholder = placeholder || t.ot_choose_product_placeholder || "Select product...";
 
     useEffect(() => {
         const handleClickOutside = (event: MouseEvent) => {
@@ -69,7 +73,7 @@ export const ProductSelector: React.FC<ProductSelectorProps> = ({
                     <input 
                         ref={inputRef}
                         className="w-full py-2.5 px-3 text-sm outline-none bg-transparent"
-                        placeholder="Search by Name or SKU..."
+                        placeholder={t.ot_search_by_name_sku}
                         value={search}
                         onChange={(e) => setSearch(e.target.value)}
                     />
@@ -81,7 +85,7 @@ export const ProductSelector: React.FC<ProductSelectorProps> = ({
                                 <span className="truncate">{selectedProduct.name}</span>
                             </span>
                         ) : (
-                            <span className="text-gray-400">{placeholder}</span>
+                            <span className="text-gray-400">{displayPlaceholder}</span>
                         )}
                         <ChevronDown size={14} className="text-gray-400 shrink-0 ml-2"/>
                     </div>
@@ -101,7 +105,7 @@ export const ProductSelector: React.FC<ProductSelectorProps> = ({
                 <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-xl max-h-60 overflow-y-auto z-50 animate-fade-in-up">
                     {filtered.length === 0 ? (
                         <div className="p-4 text-center text-gray-400 text-sm italic">
-                            {search ? "No matches found." : "Type to search..."}
+                            {search ? t.ot_no_matches_found : t.ot_type_to_search}
                         </div>
                     ) : (
                         filtered.map(p => (

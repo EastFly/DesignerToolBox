@@ -11,6 +11,10 @@ interface PlaygroundViewProps {
     language: Language;
     currentUser: User | null;
     canManageGlobalDice: boolean;
+    canAccessDiceManagement?: boolean;
+    onNavigateToDiceManagement?: () => void;
+    initialDiceId?: string | null;
+    onClearInitialDiceId?: () => void;
 }
 
 // Structured Prompt Definition
@@ -63,6 +67,33 @@ const urlToBase64 = async (url: string): Promise<string> => {
     }
 };
 
+const MODELS = [
+    { id: 'gemini-3.1-flash-image-preview', name: 'Gemini 3.1 Flash Image (Nano Banana 2)' },
+    { id: 'gemini-3-pro-image-preview', name: 'Gemini 3 Pro Image' }
+];
+
+const ASPECT_RATIOS = [
+    '1:1', '9:16', '16:9', '3:4', '4:3', '3:2', '2:3', '5:4', '4:5', '21:9'
+];
+
+const RESOLUTIONS = ['512px', '1K', '2K', '4K'];
+
+// Map requested aspect ratios to API supported ones
+const mapAspectRatio = (ratio?: string): string => {
+    if (!ratio) return '1:1';
+    const supported = ['1:1', '3:4', '4:3', '9:16', '16:9', '1:4', '1:8', '4:1', '8:1', '21:9'];
+    if (supported.includes(ratio)) return ratio;
+    
+    // Fallbacks
+    switch (ratio) {
+        case '3:2': return '4:3';
+        case '2:3': return '3:4';
+        case '5:4': return '4:3';
+        case '4:5': return '3:4';
+        default: return '1:1';
+    }
+};
+
 const SUPPORTED_LANGUAGES = [
     { value: 'English (US)', label: 'English (US)' },
     { value: 'Chinese (Simplified)', label: 'Chinese (中文)' },
@@ -82,9 +113,7 @@ const FONT_STYLES = [
     { value: 'Playful Rounded', label: 'Playful / Kids' }
 ];
 
-import { getApiKey } from '../services/geminiService';
-
-export const PlaygroundView: React.FC<PlaygroundViewProps> = ({ language, currentUser, canManageGlobalDice }) => {
+export const PlaygroundView: React.FC<PlaygroundViewProps> = ({ language, currentUser, canManageGlobalDice, canAccessDiceManagement, onNavigateToDiceManagement, initialDiceId, onClearInitialDiceId }) => {
     const t = translations[language];
     
     // Data State
@@ -96,7 +125,6 @@ export const PlaygroundView: React.FC<PlaygroundViewProps> = ({ language, curren
     // Workflow Configuration State (Plan vs Build)
     const [activeMode, setActiveMode] = useState<'plan' | 'build'>('plan');
     const [planModel, setPlanModel] = useState<string>('gemini-3-flash-preview');
-    const [buildModel, setBuildModel] = useState<string>('gemini-3-pro-image-preview');
 
     // Reference Slots State (New)
     const [references, setReferences] = useState<Record<string, ReferenceSlot>>({});
@@ -112,6 +140,7 @@ export const PlaygroundView: React.FC<PlaygroundViewProps> = ({ language, curren
 
     // Advanced Config State
     const [genConfig, setGenConfig] = useState<GenConfig>({
+        model: 'gemini-3.1-flash-image-preview',
         aspectRatio: '1:1',
         allowText: false,
         resolution: '1K',
@@ -162,7 +191,18 @@ export const PlaygroundView: React.FC<PlaygroundViewProps> = ({ language, curren
     // Load Initial Data
     useEffect(() => {
         db.getProducts().then(setProducts);
-        db.getStyleDice(canManageGlobalDice).then(setDice);
+        db.getStyleDice(canManageGlobalDice).then(loadedDice => {
+            setDice(loadedDice);
+            if (initialDiceId) {
+                const diceToApply = loadedDice.find(d => d.id === initialDiceId);
+                if (diceToApply) {
+                    applyDice(diceToApply);
+                }
+                if (onClearInitialDiceId) {
+                    onClearInitialDiceId();
+                }
+            }
+        });
         
         // Initial Greeting
         setMessages([{
@@ -171,7 +211,7 @@ export const PlaygroundView: React.FC<PlaygroundViewProps> = ({ language, curren
             content: t.pg_greeting,
             type: 'text'
         }]);
-    }, [language]);
+    }, [language, initialDiceId, canManageGlobalDice]);
 
     // Handle Product Selection -> Load ALL Images & Selling Points -> Default to first OR Dice preference
     useEffect(() => {
@@ -327,6 +367,35 @@ export const PlaygroundView: React.FC<PlaygroundViewProps> = ({ language, curren
         chatEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }, [messages, isThinking, isGenerating]);
 
+    const getApiKey = async () => {
+        let apiKey = '';
+        try {
+            apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY || '';
+        } catch (e) {
+            try {
+                apiKey = process.env.API_KEY || '';
+            } catch (e2) {
+                apiKey = '';
+            }
+        }
+        // @ts-ignore
+        if (!apiKey && typeof window !== 'undefined' && window.aistudio) {
+            // @ts-ignore
+            if (await window.aistudio.hasSelectedApiKey()) {
+                apiKey = process.env.API_KEY || '';
+            } else {
+                try {
+                    // @ts-ignore
+                    await window.aistudio.openSelectKey();
+                    apiKey = process.env.API_KEY || '';
+                } catch (e) {
+                    return null;
+                }
+            }
+        }
+        return apiKey;
+    };
+
     const handleSendChat = async () => {
         if (!input.trim() && Object.keys(references).length === 0) return;
         
@@ -346,6 +415,11 @@ export const PlaygroundView: React.FC<PlaygroundViewProps> = ({ language, curren
 
         try {
             const apiKey = await getApiKey();
+            if (!apiKey) {
+                alert("API Key is required.");
+                setIsThinking(false);
+                return;
+            }
             const ai = new GoogleGenAI({ apiKey });
 
             // 2. Construct System Prompt for STRUCTURED OUTPUT
@@ -409,9 +483,31 @@ export const PlaygroundView: React.FC<PlaygroundViewProps> = ({ language, curren
             `;
 
             const chatContent: any[] = [
-                { text: `Chat History:\n${newHistory.filter(m=>m.role!=='system').map(m => `${m.role}: ${m.content}`).join('\n')}` },
-                { text: "User Input: " + currentInput }
+                { text: "Chat History:\n" }
             ];
+
+            // Only keep the last 10 messages to save context window
+            const recentHistory = newHistory.filter(m => m.role !== 'system').slice(-10);
+
+            recentHistory.forEach((m, index) => {
+                const isLast = index === recentHistory.length - 1;
+                const prefix = isLast ? "User Input: " : `${m.role}: `;
+                
+                if (m.type === 'image') {
+                    chatContent.push({ text: `${prefix}[Generated Image]\n` });
+                    if (m.content.startsWith('data:')) {
+                        const [header, base64Data] = m.content.split(',');
+                        const mimeType = header.split(':')[1].split(';')[0];
+                        if (base64Data && mimeType) {
+                            chatContent.push({ inlineData: { mimeType, data: base64Data } });
+                        }
+                    }
+                } else if (m.type === 'proposal') {
+                    chatContent.push({ text: `${prefix}[Proposal] ${JSON.stringify(m.proposalData)}\n` });
+                } else {
+                    chatContent.push({ text: `${prefix}${m.content}\n` });
+                }
+            });
 
             // Attach Reference Images with specific labels
             if (references['product']) {
@@ -435,6 +531,8 @@ export const PlaygroundView: React.FC<PlaygroundViewProps> = ({ language, curren
                 ],
                 config: { responseMimeType: 'application/json' }
             });
+
+            db.logModelUsage('Playground', planModel, { type: 'planning', config: { responseMimeType: 'application/json' } }).catch(console.error);
 
             const responseText = response.text || '{}';
             const cleanJson = responseText.replace(/```json|```/g, '').trim();
@@ -472,6 +570,11 @@ export const PlaygroundView: React.FC<PlaygroundViewProps> = ({ language, curren
 
         try {
             const apiKey = await getApiKey();
+            if (!apiKey) {
+                alert("API Key is required.");
+                setIsGenerating(false);
+                return;
+            }
             const ai = new GoogleGenAI({ apiKey });
 
             // 1. Construct the Final Prompt from Structured Parts
@@ -621,18 +724,18 @@ export const PlaygroundView: React.FC<PlaygroundViewProps> = ({ language, curren
             }
 
             const modelConfig: any = {};
-            if (buildModel.includes('pro-image')) {
+            if ((genConfig.model || MODELS[0].id).includes('pro-image')) {
                 modelConfig.imageConfig = { 
-                    aspectRatio: genConfig.aspectRatio, 
+                    aspectRatio: mapAspectRatio(genConfig.aspectRatio), 
                     imageSize: genConfig.resolution 
                 };
             } else {
-                modelConfig.imageConfig = { aspectRatio: genConfig.aspectRatio }; 
+                modelConfig.imageConfig = { aspectRatio: mapAspectRatio(genConfig.aspectRatio) }; 
             }
 
             if (debug) {
                 setDebugPayload({
-                    model: buildModel,
+                    model: genConfig.model || MODELS[0].id,
                     config: modelConfig,
                     parts: parts.map(p => p.inlineData ? { ...p, inlineData: { ...p.inlineData, data: `(Base64 Data: ${p.inlineData.data.substring(0, 20)}...[${p.inlineData.data.length} chars])` } } : p),
                     _rawReferences: Object.keys(references).map(k => ({ key: k, hasBase64: !!references[k].base64, url: references[k].url })),
@@ -642,10 +745,13 @@ export const PlaygroundView: React.FC<PlaygroundViewProps> = ({ language, curren
             }
 
             const response = await ai.models.generateContent({
-                model: buildModel,
+                model: genConfig.model || MODELS[0].id,
                 contents: { parts: parts },
                 config: modelConfig
             });
+
+            // Log model usage
+            db.logModelUsage('Playground', genConfig.model || MODELS[0].id, { type: 'image_generation', config: modelConfig }).catch(console.error);
 
             // Extract Image
             let imageUrl = '';
@@ -668,7 +774,7 @@ export const PlaygroundView: React.FC<PlaygroundViewProps> = ({ language, curren
                         productId: proposalMsg.meta.productId,
                         sourceProposalId: proposalMsg.id,
                         usedReference: Object.keys(references).length > 0,
-                        modelUsed: buildModel,
+                        modelUsed: genConfig.model || MODELS[0].id,
                         configUsed: genConfig // Store used config
                     }
                 };
@@ -695,6 +801,11 @@ export const PlaygroundView: React.FC<PlaygroundViewProps> = ({ language, curren
         setIsExtracting(true);
         try {
             const apiKey = await getApiKey();
+            if (!apiKey) {
+                alert("API Key is required.");
+                setIsExtracting(false);
+                return;
+            }
             const ai = new GoogleGenAI({ apiKey });
             
             const usedStructure = imageMsg.meta.structuredData as StructuredPrompt;
@@ -739,6 +850,8 @@ export const PlaygroundView: React.FC<PlaygroundViewProps> = ({ language, curren
                 contents: [{ role: 'user', parts: [{ text: analysisPrompt }] }],
                 config: { responseMimeType: 'application/json' }
             });
+
+            db.logModelUsage('Playground', 'gemini-3-flash-preview', { type: 'style_extraction', config: { responseMimeType: 'application/json' } }).catch(console.error);
 
             const result = JSON.parse(response.text || '{}');
             
@@ -1006,7 +1119,7 @@ export const PlaygroundView: React.FC<PlaygroundViewProps> = ({ language, curren
                         onClick={() => handleConfirmGenerate(msg, data)}
                         className="flex-1 py-2.5 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white rounded-lg font-bold text-sm flex items-center justify-center gap-2 transition-all shadow-md transform hover:scale-[1.02]"
                     >
-                        <ImageIcon size={16}/> {t.pg_build_with} {buildModel.includes('pro') ? 'Gemini Pro' : 'Imagen'}
+                        <ImageIcon size={16}/> {t.pg_build_with} {(genConfig.model || MODELS[0].id).includes('pro') ? 'Gemini Pro' : 'Gemini Flash'}
                     </button>
                 </div>
             </div>
@@ -1020,9 +1133,20 @@ export const PlaygroundView: React.FC<PlaygroundViewProps> = ({ language, curren
                 
                 {/* Header */}
                 <div className="p-5 border-b border-gray-100 bg-gray-50 shrink-0">
-                    <h2 className="text-lg font-bold text-gray-800 flex items-center gap-2 mb-4">
-                        <Dices size={20} className="text-indigo-600"/> {t.pg_title}
-                    </h2>
+                    <div className="flex justify-between items-center mb-4">
+                        <h2 className="text-lg font-bold text-gray-800 flex items-center gap-2">
+                            <Dices size={20} className="text-indigo-600"/> {t.pg_title}
+                        </h2>
+                        {canAccessDiceManagement && onNavigateToDiceManagement && (
+                            <button
+                                onClick={onNavigateToDiceManagement}
+                                className="p-1.5 text-gray-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-md transition-colors"
+                                title={t.dm_title}
+                            >
+                                <Settings size={18} />
+                            </button>
+                        )}
+                    </div>
                     
                     {/* MODE TOGGLE */}
                     <div className="flex p-1 bg-gray-200 rounded-lg mb-4">
@@ -1217,23 +1341,31 @@ export const PlaygroundView: React.FC<PlaygroundViewProps> = ({ language, curren
                             </h4>
                             
                             <div className="space-y-3">
+                                {/* Model Selection */}
+                                <div>
+                                    <label className="block text-[10px] font-bold text-gray-400 mb-1">Model</label>
+                                    <select 
+                                        value={genConfig.model || MODELS[0].id}
+                                        onChange={(e) => setGenConfig({ ...genConfig, model: e.target.value })}
+                                        className="w-full border border-gray-200 rounded px-2 py-1.5 text-[10px] focus:ring-1 focus:ring-indigo-500 outline-none bg-white"
+                                    >
+                                        {MODELS.map(m => (
+                                            <option key={m.id} value={m.id}>{m.name}</option>
+                                        ))}
+                                    </select>
+                                </div>
+
                                 {/* Aspect Ratio */}
                                 <div>
                                     <label className="block text-[10px] font-bold text-gray-400 mb-1">{t.pg_aspect_ratio}</label>
                                     <div className="flex flex-wrap gap-1">
-                                        {[
-                                            { label: '1:1', val: '1:1', icon: <Box size={10}/> },
-                                            { label: '4:3', val: '4:3', icon: <Monitor size={10}/> },
-                                            { label: '3:4', val: '3:4', icon: <Smartphone size={10}/> },
-                                            { label: '16:9', val: '16:9', icon: <Monitor size={10}/> },
-                                            { label: '9:16', val: '9:16', icon: <Smartphone size={10}/> }
-                                        ].map(opt => (
+                                        {ASPECT_RATIOS.map(ratio => (
                                             <button
-                                                key={opt.val}
-                                                onClick={() => setGenConfig({ ...genConfig, aspectRatio: opt.val })}
-                                                className={`px-2 py-1.5 text-[10px] rounded border transition-all flex items-center gap-1 ${genConfig.aspectRatio === opt.val ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}
+                                                key={ratio}
+                                                onClick={() => setGenConfig({ ...genConfig, aspectRatio: ratio })}
+                                                className={`px-2 py-1.5 text-[10px] rounded border transition-all flex items-center gap-1 ${genConfig.aspectRatio === ratio ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}
                                             >
-                                                {opt.icon} {opt.label}
+                                                {ratio}
                                             </button>
                                         ))}
                                     </div>
@@ -1243,7 +1375,7 @@ export const PlaygroundView: React.FC<PlaygroundViewProps> = ({ language, curren
                                 <div>
                                     <label className="block text-[10px] font-bold text-gray-400 mb-1">{t.pg_resolution_quality}</label>
                                     <div className="flex flex-wrap gap-1">
-                                        {['1K', '2K'].map(res => (
+                                        {RESOLUTIONS.map(res => (
                                             <button
                                                 key={res}
                                                 onClick={() => setGenConfig({ ...genConfig, resolution: res as any })}
@@ -1305,42 +1437,7 @@ export const PlaygroundView: React.FC<PlaygroundViewProps> = ({ language, curren
                             </div>
                         </div>
 
-                        {/* Dice Library (Saved Styles) */}
-                        <div className="pt-4 border-t border-gray-100">
-                            <label className="block text-xs font-bold text-gray-500 uppercase mb-2 flex justify-between items-center">
-                                {t.pg_dice_library}
-                                <span className="bg-purple-100 text-purple-700 px-1.5 rounded text-[10px]">{dice.length}</span>
-                            </label>
-                            <div className="space-y-3 pb-8">
-                                {dice.filter(d => d.userId === currentUser?.id || d.isGlobal).map(d => (
-                                    <div 
-                                        key={d.id} 
-                                        className={`group relative rounded-lg border overflow-hidden cursor-pointer transition-all ${selectedDiceId === d.id ? 'border-indigo-500 ring-2 ring-indigo-200' : 'border-gray-200 hover:border-indigo-300'}`}
-                                        onClick={() => applyDice(d)}
-                                    >
-                                        {d.isGlobal && (
-                                            <div className="absolute top-1 right-1 bg-indigo-100/80 text-indigo-700 p-0.5 rounded-full z-10 backdrop-blur-sm" title="Global Style">
-                                                <Globe size={12} />
-                                            </div>
-                                        )}
-                                        <div className="aspect-[3/1] bg-gray-100 relative">
-                                            {d.coverImage ? (
-                                                <img src={d.coverImage || undefined} className="w-full h-full object-cover opacity-80" />
-                                            ) : (
-                                                <div className="w-full h-full flex items-center justify-center bg-indigo-50 text-indigo-300"><Sparkles size={16}/></div>
-                                            )}
-                                            <div className="absolute bottom-2 left-2 text-white font-bold text-xs truncate w-[90%] drop-shadow-md">{d.name}</div>
-                                            <button 
-                                                onClick={(e) => { e.stopPropagation(); deleteDice(d.id); }}
-                                                className="absolute top-1 right-1 text-white/50 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
-                                            >
-                                                <Trash2 size={12}/>
-                                            </button>
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
+                        {/* Removed Dice Library (Saved Styles) section */}
                     </div>
                 </div>
             </div>

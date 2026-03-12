@@ -117,7 +117,7 @@ export const UserManager: React.FC<UserManagerProps> = ({ users, roles, setUsers
               <th className="py-3">{t.role}</th>
               <th className="py-3">{t.status}</th>
               <th className="py-3">{t.joined}</th>
-              <th className="py-3 text-right">Actions</th>
+              <th className="py-3 text-right">{t.th_actions}</th>
             </tr>
           </thead>
           <tbody>

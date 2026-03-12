@@ -109,6 +109,16 @@ create table if not exists public.midnight_missions (
   updated_at timestamptz default now()
 );
 
+-- NEW: Model Usage (v2.14 - Usage Tracking)
+create table if not exists public.model_usage (
+  id uuid default gen_random_uuid() primary key,
+  user_id uuid references auth.users on delete cascade,
+  module text,
+  model_name text,
+  parameters jsonb,
+  created_at timestamptz default now()
+);
+
 -- 1.1 MIGRATIONS (Fix for Existing Tables missing new columns)
 -- Ensure 'time_logs' exists on 'tasks'
 do $$
@@ -163,6 +173,7 @@ alter table public.prompt_flows enable row level security;
 alter table public.products enable row level security;
 alter table public.style_dice enable row level security;
 alter table public.midnight_missions enable row level security;
+alter table public.model_usage enable row level security;
 
 -- Clear old policies
 drop policy if exists "Enable all access" on public.tasks;
@@ -175,6 +186,7 @@ drop policy if exists "Users insert their own dice" on public.style_dice;
 drop policy if exists "Users update their own dice" on public.style_dice;
 drop policy if exists "Users delete their own dice" on public.style_dice;
 drop policy if exists "Enable all access" on public.midnight_missions;
+drop policy if exists "Enable all access" on public.model_usage;
 drop policy if exists "Public profiles" on public.profiles;
 drop policy if exists "Self update" on public.profiles;
 drop policy if exists "Self insert" on public.profiles;
@@ -189,6 +201,7 @@ create policy "Enable all access" on public.roles for all to anon, authenticated
 create policy "Enable all access" on public.prompt_flows for all to anon, authenticated, service_role using (true) with check (true);
 create policy "Enable all access" on public.products for all to anon, authenticated, service_role using (true) with check (true);
 create policy "Enable all access" on public.midnight_missions for all to anon, authenticated, service_role using (true) with check (true);
+create policy "Enable all access" on public.model_usage for all to anon, authenticated, service_role using (true) with check (true);
 
 -- Style Dice: Private Policy
 create policy "Users see their own dice" on public.style_dice for select using (auth.uid() = user_id);
@@ -223,6 +236,7 @@ grant all on table public.prompt_flows to anon, authenticated, service_role;
 grant all on table public.products to anon, authenticated, service_role;
 grant all on table public.style_dice to anon, authenticated, service_role;
 grant all on table public.midnight_missions to anon, authenticated, service_role;
+grant all on table public.model_usage to anon, authenticated, service_role;
 
 -- 3. Storage
 insert into storage.buckets (id, name, public) values ('designflow-assets', 'designflow-assets', true) on conflict (id) do nothing;

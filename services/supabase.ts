@@ -21,3 +21,4 @@ export const TABLE_ROLES = 'roles';
 export const TABLE_PRODUCTS = 'products';
 export const TABLE_STYLE_DICE = 'style_dice';
 export const TABLE_MIDNIGHT_MISSIONS = 'midnight_missions'; // New Table
+export const TABLE_MODEL_USAGE = 'model_usage';

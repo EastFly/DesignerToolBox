@@ -184,43 +184,50 @@ export const RoleManager: React.FC<RoleManagerProps> = ({ roles, setRoles, langu
                             {selectedRole.name}
                             {selectedRole.isSystem && <span className="ml-3 bg-gray-100 text-gray-500 text-xs px-2 py-1 rounded-full font-normal border border-gray-200 flex items-center"><Shield size={10} className="mr-1"/> {t.systemRole}</span>}
                          </h3>
-                         <p className="text-gray-500 text-sm mt-1">Role ID: <span className="font-mono bg-gray-100 px-1 rounded">{selectedRole.id}</span></p>
+                         <p className="text-gray-500 text-sm mt-1">{t.set_role_id} <span className="font-mono bg-gray-100 px-1 rounded">{selectedRole.id}</span></p>
                      </div>
 
                      <div>
                          <h4 className="font-bold text-gray-700 mb-4">{t.permissions}</h4>
-                         <div className="grid grid-cols-2 gap-4">
-                             {AVAILABLE_PERMISSIONS.map(perm => {
-                                 const isChecked = selectedRole.permissions.includes(perm.key);
-                                 return (
-                                     <label 
-                                        key={perm.key} 
-                                        className={`flex items-center p-3 rounded-lg border cursor-pointer transition-all ${
-                                            isChecked 
-                                            ? 'bg-indigo-50 border-indigo-200 shadow-sm' 
-                                            : 'bg-white border-gray-200 hover:bg-gray-50'
-                                        }`}
-                                     >
-                                         <div className={`w-5 h-5 rounded border flex items-center justify-center mr-3 ${
-                                             isChecked ? 'bg-indigo-600 border-indigo-600' : 'bg-white border-gray-300'
-                                         }`}>
-                                             {isChecked && <Check size={12} className="text-white"/>}
-                                         </div>
-                                         <input 
-                                            type="checkbox" 
-                                            className="hidden"
-                                            checked={isChecked}
-                                            onChange={() => handlePermissionToggle(perm.key)}
-                                         />
-                                         <div>
-                                             <div className="text-sm font-medium text-gray-900">
-                                                 {(t as any)[`perm_${perm.key.replace('.', '_')}`] || perm.label}
-                                             </div>
-                                             <div className="text-xs text-gray-500 font-mono mt-0.5">{perm.key}</div>
-                                         </div>
-                                     </label>
-                                 );
-                             })}
+                         <div className="space-y-6">
+                             {Array.from(new Set(AVAILABLE_PERMISSIONS.map(p => p.group))).map(group => (
+                                 <div key={group} className="bg-gray-50 p-4 rounded-xl border border-gray-200">
+                                     <h5 className="font-bold text-gray-800 mb-3 text-sm uppercase tracking-wider">{group}</h5>
+                                     <div className="grid grid-cols-2 gap-3">
+                                         {AVAILABLE_PERMISSIONS.filter(p => p.group === group).map(perm => {
+                                             const isChecked = selectedRole.permissions.includes(perm.key);
+                                             return (
+                                                 <label 
+                                                    key={perm.key} 
+                                                    className={`flex items-center p-3 rounded-lg border cursor-pointer transition-all ${
+                                                        isChecked 
+                                                        ? 'bg-indigo-50 border-indigo-200 shadow-sm' 
+                                                        : 'bg-white border-gray-200 hover:bg-gray-50'
+                                                    }`}
+                                                 >
+                                                     <div className={`w-5 h-5 rounded border flex items-center justify-center mr-3 shrink-0 ${
+                                                         isChecked ? 'bg-indigo-600 border-indigo-600' : 'bg-white border-gray-300'
+                                                     }`}>
+                                                         {isChecked && <Check size={12} className="text-white"/>}
+                                                     </div>
+                                                     <input 
+                                                        type="checkbox" 
+                                                        className="hidden"
+                                                        checked={isChecked}
+                                                        onChange={() => handlePermissionToggle(perm.key)}
+                                                     />
+                                                     <div className="min-w-0">
+                                                         <div className="text-sm font-medium text-gray-900 truncate">
+                                                             {(t as any)[`perm_${perm.key.replace('.', '_')}`] || perm.label}
+                                                         </div>
+                                                         <div className="text-xs text-gray-500 font-mono mt-0.5 truncate">{perm.key}</div>
+                                                     </div>
+                                                 </label>
+                                             );
+                                         })}
+                                     </div>
+                                 </div>
+                             ))}
                          </div>
                      </div>
                  </>

@@ -13,6 +13,7 @@ import { WorkspaceModal } from './components/WorkspaceModal';
 import { SettingsModal } from './components/SettingsModal';
 import { LoginPage } from './components/LoginPage';
 import { StatsView } from './components/StatsView';
+import { ModelStatsView } from './components/ModelStatsView';
 import { TrashModal } from './components/TrashModal';
 import { ProfileModal } from './components/ProfileModal';
 import { ArchivedTasksView } from './components/ArchivedTasksView';
@@ -24,6 +25,7 @@ import { DiceStormView } from './components/DiceStormView';
 import { MidnightMissionsView } from './components/MidnightMissionsView'; // New
 import { DesignerToolboxView } from './components/DesignerToolboxView';
 import { OperatorToolboxView } from './components/OperatorToolboxView';
+import { XLabView } from './components/XLabView';
 import { ArchiveConfirmModal } from './components/ArchiveConfirmModal';
 import { PublicShareView } from './components/PublicShareView';
 import { Language, translations } from './i18n';
@@ -47,6 +49,7 @@ const App: React.FC = () => {
 
   // --- UI State ---
   const [activeView, setActiveView] = useState<ViewType>('board');
+  const [editingDiceId, setEditingDiceId] = useState<string | null>(null);
   const [language, setLanguage] = useState<Language>('en');
   const [searchQuery, setSearchQuery] = useState('');
   const [publicShareLinkId, setPublicShareLinkId] = useState<string | null>(null);
@@ -153,6 +156,19 @@ const App: React.FC = () => {
       loadData();
     }
   }, [currentUser?.id]); // Reload when user changes/logs in
+
+  // Auto-redirect if user lands on board but doesn't have dashboard access
+  useEffect(() => {
+    if (currentUser && roles.length > 0 && activeView === 'board' && !can('dashboard.access')) {
+        if (can('products.manage') || can('projects.access')) setActiveView('products');
+        else if (can('stats.view') || can('analytics.access')) setActiveView('stats');
+        else if (can('prompt.manage')) setActiveView('prompt_builder');
+        else if (can('playground.access')) setActiveView('playground');
+        else if (can('xlab.access')) setActiveView('x_lab');
+        else if (can('dicestorm.access')) setActiveView('dice_storm');
+        else if (can('midnight.access')) setActiveView('midnight_missions');
+    }
+  }, [currentUser, roles, activeView]);
 
   // --- Handlers ---
 
@@ -369,12 +385,15 @@ const App: React.FC = () => {
         setActiveView={setActiveView} 
         language={language} 
         onLogout={handleLogout}
-        canViewStats={can('stats.view')}
-        canManageProducts={can('products.manage')}
+        canViewStats={can('stats.view') || can('analytics.access')}
+        canManageProducts={can('products.manage') || can('projects.access')}
         canManagePrompts={can('prompt.manage')}
         canAccessPlayground={can('playground.access')}
+        canAccessXLab={can('xlab.access')}
         canAccessDiceStorm={can('dicestorm.access')}
         canAccessMidnight={can('midnight.access')}
+        canAccessDashboard={can('dashboard.access')}
+        canAccessDiceManagement={can('dice.access')}
       />
 
       <div className="flex-1 flex flex-col min-w-0">
@@ -394,7 +413,7 @@ const App: React.FC = () => {
           onLogout={handleLogout}
           users={users}
           canViewAll={can('task.view_all')}
-          canManageSettings={can('settings.manage')}
+          canManageSettings={can('settings.manage') || can('settings.task_types') || can('settings.global_fields') || can('settings.global_stages') || can('settings.roles') || can('settings.users') || can('settings.system') || can('settings.model_usage')}
         />
 
         <main className="flex-1 overflow-hidden relative">
@@ -404,7 +423,7 @@ const App: React.FC = () => {
              </div>
           )}
 
-          {activeView === 'board' && (
+          {activeView === 'board' && can('dashboard.access') && (
             <div className="h-full overflow-x-auto overflow-y-hidden p-6">
               <div className="flex gap-6 h-full min-w-max">
                 {stages.map(stage => {
@@ -452,32 +471,61 @@ const App: React.FC = () => {
             </div>
           )}
 
-          {activeView === 'stats' && can('stats.view') && (
+          {activeView === 'stats' && (can('stats.view') || can('analytics.access')) && (
              <StatsView tasks={tasks} users={users} stages={stages} language={language} />
+          )}
+
+          {activeView === 'model_stats' && (can('stats.view') || can('analytics.access')) && (
+             <ModelStatsView language={language} />
           )}
 
           {activeView === 'prompt_builder' && can('prompt.manage') && (
              <PromptBuilderView language={language} allFields={fields} />
           )}
 
-          {activeView === 'products' && can('products.manage') && (
+          {activeView === 'products' && (can('products.manage') || can('projects.access')) && (
              <ProductManager language={language} allFields={fields} tasks={tasks} currentUser={currentUser} />
           )}
 
           {activeView === 'playground' && can('playground.access') && (
-             <PlaygroundView language={language} currentUser={currentUser} canManageGlobalDice={can('dice.manage_global')} />
+             <PlaygroundView 
+                language={language} 
+                currentUser={currentUser} 
+                canManageGlobalDice={can('dice.manage_global')} 
+                canAccessDiceManagement={can('dice.access')}
+                onNavigateToDiceManagement={() => setActiveView('dice_management')}
+                initialDiceId={editingDiceId}
+                onClearInitialDiceId={() => setEditingDiceId(null)}
+             />
           )}
 
-          {activeView === 'dice_management' && can('playground.access') && (
-             <DiceManagementView currentUser={currentUser} canManageGlobalDice={can('dice.manage_global')} language={language} />
+          {activeView === 'dice_management' && can('dice.access') && (
+             <DiceManagementView 
+                currentUser={currentUser} 
+                canManageGlobalDice={can('dice.manage_global')} 
+                language={language} 
+                onEditInPlayground={(diceId) => {
+                    setEditingDiceId(diceId);
+                    setActiveView('playground');
+                }}
+             />
           )}
 
           {activeView === 'dice_storm' && can('dicestorm.access') && (
-             <DiceStormView language={language} currentUser={currentUser} canManageGlobalDice={can('dice.manage_global')} />
+             <DiceStormView 
+                language={language} 
+                currentUser={currentUser} 
+                canManageGlobalDice={can('dice.manage_global')} 
+                canAccessMidnight={can('midnight.access')}
+                onNavigateToMidnightMissions={() => setActiveView('midnight_missions')}
+             />
           )}
 
           {activeView === 'midnight_missions' && can('midnight.access') && (
-             <MidnightMissionsView /> 
+             <MidnightMissionsView 
+                language={language} 
+                onNavigateBack={() => setActiveView('dice_storm')}
+             /> 
           )}
 
           {activeView === 'designer_toolbox' && can('midnight.access') && (
@@ -488,7 +536,11 @@ const App: React.FC = () => {
              <OperatorToolboxView language={language} />
           )}
 
-          {activeView === 'archived' && (
+          {activeView === 'x_lab' && can('xlab.access') && (
+             <XLabView language={language} />
+          )}
+
+          {activeView === 'archived' && can('dashboard.access') && (
              <ArchivedTasksView 
                 archivedTasks={tasks.filter(t => {
                     const isArchived = t.lifecycleStatus === 'archived';
@@ -500,6 +552,29 @@ const App: React.FC = () => {
                 language={language}
                 stages={stages}
              />
+          )}
+
+          {/* Fallback for unauthorized access */}
+          {((activeView === 'board' && !can('dashboard.access')) ||
+            (activeView === 'archived' && !can('dashboard.access')) ||
+            (activeView === 'stats' && !can('stats.view') && !can('analytics.access')) ||
+            (activeView === 'model_stats' && !can('stats.view') && !can('analytics.access')) ||
+            (activeView === 'prompt_builder' && !can('prompt.manage')) ||
+            (activeView === 'products' && !can('products.manage') && !can('projects.access')) ||
+            (activeView === 'playground' && !can('playground.access')) ||
+            (activeView === 'dice_management' && !can('dice.access')) ||
+            (activeView === 'dice_storm' && !can('dicestorm.access')) ||
+            (activeView === 'midnight_missions' && !can('midnight.access')) ||
+            (activeView === 'designer_toolbox' && !can('midnight.access')) ||
+            (activeView === 'operator_toolbox' && !can('midnight.access')) ||
+            (activeView === 'x_lab' && !can('xlab.access'))) && (
+             <div className="flex flex-col items-center justify-center h-full text-gray-500">
+                <div className="bg-gray-100 p-6 rounded-full mb-4">
+                   <AlertCircle size={48} className="text-gray-400" />
+                </div>
+                <h2 className="text-xl font-bold text-gray-700 mb-2">Access Denied</h2>
+                <p>You do not have permission to view this page.</p>
+             </div>
           )}
         </main>
       </div>
@@ -566,7 +641,13 @@ const App: React.FC = () => {
         allStages={stages}
         allFields={fields}
         currentUser={currentUser}
-        canManageUsers={can('users.approve')}
+        canManageTaskTypes={can('settings.manage') || can('settings.task_types')}
+        canManageGlobalFields={can('settings.manage') || can('settings.global_fields')}
+        canManageGlobalStages={can('settings.manage') || can('settings.global_stages')}
+        canManageRoles={can('settings.manage') || can('settings.roles')}
+        canManageUsers={can('settings.manage') || can('settings.users') || can('users.approve')}
+        canManageSystem={can('settings.manage') || can('settings.system')}
+        canManageModelUsage={can('settings.manage') || can('settings.model_usage')}
         onSystemReset={handleSystemReset}
       />
 

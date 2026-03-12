@@ -21,6 +21,8 @@ interface DiceStormViewProps {
     language: Language;
     currentUser: User | null;
     canManageGlobalDice: boolean;
+    canAccessMidnight?: boolean;
+    onNavigateToMidnightMissions?: () => void;
 }
 
 // Result Item for History
@@ -117,9 +119,23 @@ const urlToBase64 = async (url: string): Promise<string> => {
     }
 };
 
-import { getApiKey } from '../services/geminiService';
+// Map requested aspect ratios to API supported ones
+const mapAspectRatio = (ratio?: string): string => {
+    if (!ratio) return '1:1';
+    const supported = ['1:1', '3:4', '4:3', '9:16', '16:9', '1:4', '1:8', '4:1', '8:1', '21:9'];
+    if (supported.includes(ratio)) return ratio;
+    
+    // Fallbacks
+    switch (ratio) {
+        case '3:2': return '4:3';
+        case '2:3': return '3:4';
+        case '5:4': return '4:3';
+        case '4:5': return '3:4';
+        default: return '1:1';
+    }
+};
 
-export const DiceStormView: React.FC<DiceStormViewProps> = ({ language, currentUser, canManageGlobalDice }) => {
+export const DiceStormView: React.FC<DiceStormViewProps> = ({ language, currentUser, canManageGlobalDice, canAccessMidnight, onNavigateToMidnightMissions }) => {
     const t = translations[language];
     
     // Data State
@@ -414,6 +430,8 @@ export const DiceStormView: React.FC<DiceStormViewProps> = ({ language, currentU
             config: { responseMimeType: 'application/json' }
         });
 
+        db.logModelUsage('DiceStorm', 'gemini-3-flash-preview', { type: 'planning', config: { responseMimeType: 'application/json' } }).catch(console.error);
+
         const cleanJson = (planResponse.text || '{}').replace(/```json|```/g, '').trim();
         let structure = { subject: userRequest, environment: '', lighting: '', composition: '' };
         try {
@@ -561,11 +579,30 @@ export const DiceStormView: React.FC<DiceStormViewProps> = ({ language, currentU
         if (!product) return;
 
         setIsStorming(true);
-        const apiKey = await getApiKey();
+        let apiKey = '';
+        try {
+            apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY || '';
+        } catch (e) {
+            try {
+                apiKey = process.env.API_KEY || '';
+            } catch (e2) {
+                apiKey = '';
+            }
+        }
         
-        if (!apiKey) {
-            setIsStorming(false);
-            return;
+        // Use window.aistudio if available to get the API key
+        if (!apiKey && window.aistudio && await window.aistudio.hasSelectedApiKey()) {
+            // apiKey is injected into process.env.API_KEY by the platform
+            apiKey = process.env.API_KEY || '';
+        } else if (!apiKey && window.aistudio) {
+            try {
+                await window.aistudio.openSelectKey();
+                apiKey = process.env.API_KEY || '';
+            } catch (e) {
+                console.error("Failed to select API key", e);
+                setIsStorming(false);
+                return;
+            }
         }
         
         const ai = new GoogleGenAI({ apiKey });
@@ -619,18 +656,21 @@ export const DiceStormView: React.FC<DiceStormViewProps> = ({ language, currentU
                 }
 
                 // Config
+                const modelToUse = slot.config.model || 'gemini-3.1-flash-image-preview';
                 const modelConfig = {
                     imageConfig: { 
-                        aspectRatio: slot.config.aspectRatio, 
+                        aspectRatio: mapAspectRatio(slot.config.aspectRatio || '1:1'), 
                         imageSize: slot.config.resolution 
                     }
                 };
 
                 const response = await ai.models.generateContent({
-                    model: 'gemini-3-pro-image-preview',
+                    model: modelToUse,
                     contents: { parts },
                     config: modelConfig
                 });
+
+                db.logModelUsage('DiceStorm', modelToUse, { type: 'image_generation', config: modelConfig }).catch(console.error);
 
                 // Extract Image
                 let outputUrl = '';
@@ -683,10 +723,26 @@ export const DiceStormView: React.FC<DiceStormViewProps> = ({ language, currentU
         setIsQueuingMission(true);
 
         try {
-            const apiKey = await getApiKey();
-            if (!apiKey) {
-                setIsQueuingMission(false);
-                return;
+            let apiKey = '';
+            try {
+                apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY || '';
+            } catch (e) {
+                try {
+                    apiKey = process.env.API_KEY || '';
+                } catch (e2) {
+                    apiKey = '';
+                }
+            }
+            if (!apiKey && window.aistudio && await window.aistudio.hasSelectedApiKey()) {
+                apiKey = process.env.API_KEY || '';
+            } else if (!apiKey && window.aistudio) {
+                try {
+                    await window.aistudio.openSelectKey();
+                    apiKey = process.env.API_KEY || '';
+                } catch (e) {
+                    setIsQueuingMission(false);
+                    return;
+                }
             }
             const ai = new GoogleGenAI({ apiKey });
 
@@ -715,11 +771,11 @@ export const DiceStormView: React.FC<DiceStormViewProps> = ({ language, currentU
                 tasks.push({
                     slotId: slot.id,
                     diceName: slot.name,
-                    model: 'gemini-3-pro-image-preview',
+                    model: slot.config.model || 'gemini-3.1-flash-image-preview',
                     prompt: finalPrompt,
                     structuredCall,
                     config: {
-                        aspectRatio: slot.config.aspectRatio,
+                        aspectRatio: mapAspectRatio(slot.config.aspectRatio || '1:1'),
                         imageSize: slot.config.resolution
                     },
                     referenceImages
@@ -935,6 +991,15 @@ export const DiceStormView: React.FC<DiceStormViewProps> = ({ language, currentU
                         </h2>
                         <p className="text-gray-500 text-sm mt-1 ml-14">{t.ds_subtitle}</p>
                     </div>
+                    {canAccessMidnight && onNavigateToMidnightMissions && (
+                        <button
+                            onClick={onNavigateToMidnightMissions}
+                            className="flex items-center gap-2 px-4 py-2 bg-gray-900 hover:bg-black text-white rounded-lg text-sm font-medium transition-colors shadow-sm"
+                        >
+                            <Moon size={16} />
+                            {t.mm_title}
+                        </button>
+                    )}
                 </div>
 
                 <div className="flex flex-col md:flex-row gap-6 items-end">

@@ -1,10 +1,12 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { UploadCloud, Image as ImageIcon, Type, Settings, Download, Loader2, X, Maximize2, CheckCircle, AlertCircle, Sparkles, Box, LayoutTemplate, ChevronLeft, ChevronRight, Bug } from 'lucide-react';
+import { UploadCloud, Image as ImageIcon, Type, Settings, Download, Loader2, X, Maximize2, CheckCircle, AlertCircle, Sparkles, Box, LayoutTemplate, ChevronLeft, ChevronRight, Bug, History, RefreshCw, Trash2 } from 'lucide-react';
 import { GoogleGenAI } from '@google/genai';
 import { translations } from '../i18n';
 import { Product } from '../types';
 import { db } from '../services/db';
 import { ProductSelector } from './ProductSelector';
+import { HistoryItem, saveHistoryItem, getHistoryItems, deleteHistoryItem, clearHistory } from '../services/localHistory';
+import JSZip from 'jszip';
 
 interface DesignerToolboxViewProps {
     language: string;
@@ -18,6 +20,14 @@ interface UploadedImage {
     resultUrl?: string;
     errorMsg?: string;
     debugPayload?: any;
+}
+
+interface RemixAsset {
+    id: string;
+    file: File;
+    preview: string;
+    role: 'product' | 'scenario' | 'layout' | 'inline';
+    label: string;
 }
 
 const MODELS = [
@@ -53,19 +63,26 @@ const mapAspectRatio = (ratio: string): string => {
     }
 };
 
-import { getApiKey } from '../services/geminiService';
-
 export const DesignerToolboxView: React.FC<DesignerToolboxViewProps> = ({ language }) => {
     const t = translations[language as keyof typeof translations];
-    const [mode, setMode] = useState<'resize' | 'translate' | 'reimagine'>('resize');
+    const [mode, setMode] = useState<'resize' | 'translate' | 'reimagine' | 'remix'>('resize');
     const [selectedModel, setSelectedModel] = useState(MODELS[0].id);
     const [aspectRatio, setAspectRatio] = useState('1:1');
     const [resolution, setResolution] = useState('1K');
     const [targetLanguage, setTargetLanguage] = useState(TARGET_LANGUAGES[0]);
     const [customPrompt, setCustomPrompt] = useState('');
     const [images, setImages] = useState<UploadedImage[]>([]);
+    const [remixAssets, setRemixAssets] = useState<RemixAsset[]>([]);
     const [isProcessingBatch, setIsProcessingBatch] = useState(false);
     const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
+    const [showHistory, setShowHistory] = useState(false);
+    const [historyItems, setHistoryItems] = useState<HistoryItem[]>([]);
+
+    useEffect(() => {
+        if (showHistory) {
+            getHistoryItems().then(setHistoryItems).catch(console.error);
+        }
+    }, [showHistory]);
 
     // Product Selection State
     const [productSource, setProductSource] = useState<'db' | 'manual'>('db');
@@ -134,6 +151,60 @@ export const DesignerToolboxView: React.FC<DesignerToolboxViewProps> = ({ langua
         if (fileInputRef.current) fileInputRef.current.value = '';
     };
 
+    const handleRemixAssetUpload = (e: React.ChangeEvent<HTMLInputElement>, role: 'product' | 'scenario' | 'layout' | 'inline') => {
+        if (e.target.files && e.target.files.length > 0) {
+            const files = Array.from(e.target.files) as File[];
+            const newAssets = files.map((file, index) => {
+                const existingRoleCount = remixAssets.filter(a => a.role === role).length;
+                return {
+                    id: Math.random().toString(36).substring(7),
+                    file,
+                    preview: URL.createObjectURL(file),
+                    role,
+                    label: `[${role} ${existingRoleCount + index + 1}]`
+                };
+            });
+            
+            if (role === 'scenario' || role === 'layout') {
+                // Replace existing if single
+                setRemixAssets(prev => [...prev.filter(a => a.role !== role), newAssets[0]]);
+            } else {
+                setRemixAssets(prev => [...prev, ...newAssets]);
+            }
+        }
+        e.target.value = '';
+    };
+
+    const handleTextareaDrop = (e: React.DragEvent<HTMLTextAreaElement>) => {
+        e.preventDefault();
+        if (mode !== 'remix') return;
+        
+        if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+            const files = Array.from(e.dataTransfer.files).filter((f: File) => f.type.startsWith('image/')) as File[];
+            if (files.length === 0) return;
+            
+            const newAssets = files.map((file, index) => {
+                const existingRoleCount = remixAssets.filter(a => a.role === 'inline').length;
+                return {
+                    id: Math.random().toString(36).substring(7),
+                    file,
+                    preview: URL.createObjectURL(file),
+                    role: 'inline' as const,
+                    label: `[inline ${existingRoleCount + index + 1}]`
+                };
+            });
+            
+            setRemixAssets(prev => [...prev, ...newAssets]);
+            
+            const labels = newAssets.map(a => a.label).join(' ');
+            setCustomPrompt(prev => prev + (prev ? ' ' : '') + labels + ' ');
+        }
+    };
+
+    const removeRemixAsset = (id: string) => {
+        setRemixAssets(prev => prev.filter(a => a.id !== id));
+    };
+
     const removeImage = (id: string) => {
         setImages(prev => prev.filter(img => img.id !== id));
     };
@@ -171,10 +242,39 @@ export const DesignerToolboxView: React.FC<DesignerToolboxViewProps> = ({ langua
         }
     };
 
-    const processImages = async () => {
-        if (images.length === 0) return;
+    const processImages = async (targetImageId?: string) => {
+        if (mode !== 'remix' && images.length === 0) return;
+        if (mode === 'remix' && remixAssets.length === 0) return;
 
-        const apiKey = await getApiKey();
+        // Priority: GEMINI_API_KEY (User provided env) -> API_KEY (Platform injected)
+        let apiKey = '';
+        try {
+            apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY || '';
+        } catch (e) {
+            try {
+                apiKey = process.env.API_KEY || '';
+            } catch (e2) {
+                apiKey = '';
+            }
+        }
+
+        // For image models, we MUST ensure the user has selected a paid key via the platform flow
+        // @ts-ignore
+        if (!apiKey && typeof window !== 'undefined' && window.aistudio) {
+            // @ts-ignore
+            if (await window.aistudio.hasSelectedApiKey()) {
+                apiKey = process.env.API_KEY || '';
+            } else {
+                try {
+                    // @ts-ignore
+                    await window.aistudio.openSelectKey();
+                    apiKey = process.env.API_KEY || '';
+                } catch (e) {
+                    alert(t.dt_select_key_alert);
+                    return;
+                }
+            }
+        }
 
         // If still no key, we can't proceed
         if (!apiKey) {
@@ -208,9 +308,100 @@ export const DesignerToolboxView: React.FC<DesignerToolboxViewProps> = ({ langua
             }
         }
 
+        if (mode === 'remix') {
+            const newImageId = targetImageId || Math.random().toString(36).substring(7);
+            const scenarioAsset = remixAssets.find(a => a.role === 'scenario');
+            const previewUrl = scenarioAsset ? scenarioAsset.preview : (remixAssets[0]?.preview || '');
+            
+            if (targetImageId) {
+                setImages(prev => prev.map(p => p.id === targetImageId ? { ...p, status: 'processing' } : p));
+            } else {
+                setImages(prev => [{
+                    id: newImageId,
+                    file: new File([], 'remix.jpg'),
+                    preview: previewUrl,
+                    status: 'processing'
+                }, ...prev]);
+            }
+
+            try {
+                let prompt = `You are an expert AI Art Director. Your task is to combine the provided product images into the scenario image, following the layout image's structure.
+${customPrompt ? `Additional instructions: ${customPrompt}` : ''}
+Please ensure the products are placed accurately and the final image looks photorealistic and cohesive.`;
+                
+                const parts: any[] = [{ text: prompt }];
+                
+                for (const asset of remixAssets) {
+                    const base64Data = await fileToBase64(asset.file);
+                    parts.push({ text: `${asset.label} (${asset.role}):` });
+                    parts.push({
+                        inlineData: {
+                            data: base64Data,
+                            mimeType: asset.file.type
+                        }
+                    });
+                }
+
+                const config: any = {
+                    imageConfig: {
+                        imageSize: resolution as any,
+                        aspectRatio: mapAspectRatio(aspectRatio)
+                    }
+                };
+
+                const debugPayload = {
+                    model: selectedModel,
+                    prompt: prompt,
+                    config: config,
+                    assets: remixAssets.map(a => a.label)
+                };
+
+                const response = await ai.models.generateContent({
+                    model: selectedModel,
+                    contents: { parts },
+                    config: config
+                });
+
+                db.logModelUsage('DesignerToolbox', selectedModel, { type: mode, config }).catch(console.error);
+
+                let resultUrl = '';
+                if (response.candidates && response.candidates[0]?.content?.parts) {
+                    for (const part of response.candidates[0].content.parts) {
+                        if (part.inlineData) {
+                            resultUrl = `data:${part.inlineData.mimeType || 'image/jpeg'};base64,${part.inlineData.data}`;
+                            break;
+                        }
+                    }
+                }
+
+                if (resultUrl) {
+                    setImages(prev => prev.map(p => p.id === newImageId ? { ...p, status: 'success', resultUrl, debugPayload } : p));
+                    
+                    const historyItem: HistoryItem = {
+                        id: Date.now().toString() + Math.random().toString(36).substring(7),
+                        timestamp: Date.now(),
+                        mode: mode,
+                        originalImage: remixAssets[0]?.preview || '',
+                        resultImage: resultUrl,
+                        prompt: customPrompt
+                    };
+                    saveHistoryItem(historyItem).catch(console.error);
+                } else {
+                    throw new Error(t.dt_no_image_returned);
+                }
+            } catch (error: any) {
+                console.error("Processing error:", error);
+                setImages(prev => prev.map(p => p.id === newImageId ? { ...p, status: 'error', errorMsg: error.message || t.dt_processing_error } : p));
+            }
+
+            setIsProcessingBatch(false);
+            return;
+        }
+
         for (let i = 0; i < images.length; i++) {
             const img = images[i];
-            if (img.status === 'success') continue;
+            if (targetImageId && img.id !== targetImageId) continue;
+            if (!targetImageId && img.status === 'success') continue;
 
             setImages(prev => prev.map(p => p.id === img.id ? { ...p, status: 'processing' } : p));
 
@@ -259,7 +450,7 @@ ${customPrompt ? `Additional instructions: ${customPrompt}` : ''}`;
                         });
                     }
 
-                    prompt = `Translate the text in the FIRST image into ${targetLanguage}. 
+                    prompt = `Generate a new image that is identical to the FIRST image, but with all text translated into ${targetLanguage}. 
 ONLY translate the text. Do NOT obscure or change the main subject, icons, products, or any non-text elements.
 You may adjust line breaks and local text positions slightly to accommodate the translated text length, but keep the overall design intact.
 ${productBase64 ? 'The SECOND image provided is the PRODUCT REFERENCE. Use it to ensure any product details remain consistent and are not accidentally altered during the translation process.' : ''}
@@ -290,6 +481,8 @@ Return a JSON object strictly. Do not include markdown code blocks if possible, 
                         config: { responseMimeType: 'application/json' }
                     });
 
+                    db.logModelUsage('DesignerToolbox', 'gemini-3-flash-preview', { type: 'reimagine_planning', config: { responseMimeType: 'application/json' } }).catch(console.error);
+
                     const cleanJson = (planResponse.text || '{}').replace(/```json|```/g, '').trim();
                     let structure = { subject: 'A product', environment: '', lighting: '', composition: '' };
                     try {
@@ -301,7 +494,7 @@ Return a JSON object strictly. Do not include markdown code blocks if possible, 
 
                     // 2. Build Final Prompt
                     const productReferenceInstruction = productBase64 
-                        ? "CRITICAL RULE 1 (SUBJECT - ABSOLUTE PRIORITY): The 'Product Reference' image is the ONLY source of truth for the product. You MUST accurately extract and render this exact product. Maintain its exact shape, size proportions, color, branding, materials, and details. This rule supersedes ALL other layout or style adjustments. If the product appears multiple times in the scene, EVERY instance must be perfectly accurate to the Product Reference. DO NOT use the product from the layout or style references."
+                        ? "CRITICAL RULE 1 (SUBJECT - ABSOLUTE PRIORITY): You MUST REPLACE the product in the original image with the product shown in the 'Product Reference' image. The 'Product Reference' image is the ONLY source of truth for the product. You MUST accurately extract and render this exact product into the scene. Maintain its exact shape, size proportions, color, branding, materials, and details. This rule supersedes ALL other layout or style adjustments. If the product appears multiple times in the scene, EVERY instance must be perfectly replaced with the Product Reference. DO NOT use the product from the layout or style references."
                         : "";
 
                     let layoutInstruction = "";
@@ -343,6 +536,7 @@ Composition: ${structure.composition}
 MODEL/SUBJECT: ${modelInstruction}
 
 Instructions: Combine these elements into a high-fidelity, photorealistic e-commerce product render. 
+You MUST REPLACE the product in the Composition Reference with the Product Reference.
 ABSOLUTE PRIORITY: The Product Reference must be rendered with 100% accuracy in shape, detail, and scale, regardless of any layout or style changes. If the product appears multiple times, ensure every instance is perfectly consistent.
 Draw artistic inspiration from the Style Reference to define the mood, lighting, and textures, adapting them to build a harmonious scene.
 ${customPrompt ? `Additional instructions: ${customPrompt}` : ''}`;
@@ -392,6 +586,8 @@ ${customPrompt ? `Additional instructions: ${customPrompt}` : ''}`;
                     config: config
                 });
 
+                db.logModelUsage('DesignerToolbox', selectedModel, { type: mode, config }).catch(console.error);
+
                 let resultUrl = '';
                 if (response.candidates && response.candidates[0]?.content?.parts) {
                     for (const part of response.candidates[0].content.parts) {
@@ -404,6 +600,17 @@ ${customPrompt ? `Additional instructions: ${customPrompt}` : ''}`;
 
                 if (resultUrl) {
                     setImages(prev => prev.map(p => p.id === img.id ? { ...p, status: 'success', resultUrl, debugPayload } : p));
+                    
+                    // Save to history
+                    const historyItem: HistoryItem = {
+                        id: Date.now().toString() + Math.random().toString(36).substring(7),
+                        timestamp: Date.now(),
+                        mode: mode,
+                        originalImage: `data:${img.file.type};base64,${base64Data}`,
+                        resultImage: resultUrl,
+                        prompt: customPrompt
+                    };
+                    saveHistoryItem(historyItem).catch(console.error);
                 } else {
                     throw new Error(t.dt_no_image_returned);
                 }
@@ -417,23 +624,42 @@ ${customPrompt ? `Additional instructions: ${customPrompt}` : ''}`;
         setIsProcessingBatch(false);
     };
 
-    const downloadAll = () => {
+    const downloadAll = async () => {
         const successfulImages = images.filter(img => img.status === 'success' && img.resultUrl);
-        successfulImages.forEach((img, index) => {
+        if (successfulImages.length === 0) return;
+
+        const zip = new JSZip();
+        
+        for (let index = 0; index < successfulImages.length; index++) {
+            const img = successfulImages[index];
+            try {
+                const response = await fetch(img.resultUrl!);
+                const blob = await response.blob();
+                zip.file(`processed_${mode}_${index + 1}.jpeg`, blob);
+            } catch (error) {
+                console.error("Failed to add image to zip", error);
+            }
+        }
+
+        try {
+            const content = await zip.generateAsync({ type: 'blob' });
             const a = document.createElement('a');
-            a.href = img.resultUrl!;
-            a.download = `processed_${mode}_${index + 1}.jpeg`;
+            a.href = URL.createObjectURL(content);
+            a.download = `designer_toolbox_${mode}_${Date.now()}.zip`;
             document.body.appendChild(a);
             a.click();
             document.body.removeChild(a);
-        });
+            URL.revokeObjectURL(a.href);
+        } catch (error) {
+            console.error("Failed to generate zip", error);
+        }
     };
 
     return (
         <div className="h-full flex flex-col bg-slate-50">
             {/* Header */}
-            <div className="bg-white border-b border-gray-200 px-8 py-6 shrink-0">
-                <div className="flex items-center gap-3 mb-2">
+            <div className="bg-white border-b border-gray-200 px-8 py-6 shrink-0 flex justify-between items-center">
+                <div className="flex items-center gap-3">
                     <div className="w-10 h-10 bg-gradient-to-br from-pink-500 to-rose-600 rounded-xl flex items-center justify-center text-white shadow-lg">
                         <LayoutTemplate size={20} />
                     </div>
@@ -449,6 +675,7 @@ ${customPrompt ? `Additional instructions: ${customPrompt}` : ''}`;
                 <div className="w-80 bg-white border-r border-gray-200 flex flex-col h-full shrink-0 overflow-y-auto custom-scrollbar">
                     <div className="p-6 space-y-6">
                         {/* Product Selection */}
+                        {mode !== 'remix' && (
                         <div>
                             <div className="flex items-center justify-between mb-2">
                                 <label className="text-xs font-bold text-gray-400 uppercase tracking-wider">{t.dt_product_constraint}</label>
@@ -559,11 +786,75 @@ ${customPrompt ? `Additional instructions: ${customPrompt}` : ''}`;
                                 </div>
                             )}
                         </div>
+                        )}
+
+                        {/* Remix Assets */}
+                        {mode === 'remix' && (
+                            <div className="space-y-4">
+                                <label className="text-xs font-bold text-gray-400 uppercase tracking-wider block">Remix Assets</label>
+                                
+                                {/* Products */}
+                                <div className="bg-gray-50 p-3 rounded-lg border border-gray-200">
+                                    <div className="flex justify-between items-center mb-2">
+                                        <span className="text-[10px] font-bold text-gray-600 uppercase">Products (Multiple)</span>
+                                        <label className="cursor-pointer text-[10px] bg-white border border-gray-200 px-2 py-1 rounded hover:bg-gray-50">
+                                            Add
+                                            <input type="file" multiple className="hidden" accept="image/*" onChange={e => handleRemixAssetUpload(e, 'product')} />
+                                        </label>
+                                    </div>
+                                    <div className="flex flex-wrap gap-2">
+                                        {remixAssets.filter(a => a.role === 'product').map(asset => (
+                                            <div key={asset.id} className="relative w-12 h-12 border border-gray-200 rounded bg-white group">
+                                                <img src={asset.preview} className="w-full h-full object-contain p-1" />
+                                                <button onClick={() => removeRemixAsset(asset.id)} className="absolute -top-1 -right-1 bg-red-500 text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100"><X size={10}/></button>
+                                                <div className="absolute -bottom-4 left-1/2 -translate-x-1/2 text-[8px] whitespace-nowrap text-gray-500">{asset.label}</div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+
+                                {/* Scenario */}
+                                <div className="bg-gray-50 p-3 rounded-lg border border-gray-200">
+                                    <div className="flex justify-between items-center mb-2">
+                                        <span className="text-[10px] font-bold text-gray-600 uppercase">Scenario (1)</span>
+                                        <label className="cursor-pointer text-[10px] bg-white border border-gray-200 px-2 py-1 rounded hover:bg-gray-50">
+                                            Upload
+                                            <input type="file" className="hidden" accept="image/*" onChange={e => handleRemixAssetUpload(e, 'scenario')} />
+                                        </label>
+                                    </div>
+                                    {remixAssets.find(a => a.role === 'scenario') && (
+                                        <div className="relative w-full aspect-video border border-gray-200 rounded bg-white group">
+                                            <img src={remixAssets.find(a => a.role === 'scenario')!.preview} className="w-full h-full object-contain p-1" />
+                                            <button onClick={() => removeRemixAsset(remixAssets.find(a => a.role === 'scenario')!.id)} className="absolute top-1 right-1 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100"><X size={12}/></button>
+                                            <div className="absolute bottom-1 left-1 bg-black/50 text-white text-[10px] px-1 rounded">{remixAssets.find(a => a.role === 'scenario')!.label}</div>
+                                        </div>
+                                    )}
+                                </div>
+
+                                {/* Layout */}
+                                <div className="bg-gray-50 p-3 rounded-lg border border-gray-200">
+                                    <div className="flex justify-between items-center mb-2">
+                                        <span className="text-[10px] font-bold text-gray-600 uppercase">Layout (1)</span>
+                                        <label className="cursor-pointer text-[10px] bg-white border border-gray-200 px-2 py-1 rounded hover:bg-gray-50">
+                                            Upload
+                                            <input type="file" className="hidden" accept="image/*" onChange={e => handleRemixAssetUpload(e, 'layout')} />
+                                        </label>
+                                    </div>
+                                    {remixAssets.find(a => a.role === 'layout') && (
+                                        <div className="relative w-full aspect-video border border-gray-200 rounded bg-white group">
+                                            <img src={remixAssets.find(a => a.role === 'layout')!.preview} className="w-full h-full object-contain p-1" />
+                                            <button onClick={() => removeRemixAsset(remixAssets.find(a => a.role === 'layout')!.id)} className="absolute top-1 right-1 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100"><X size={12}/></button>
+                                            <div className="absolute bottom-1 left-1 bg-black/50 text-white text-[10px] px-1 rounded">{remixAssets.find(a => a.role === 'layout')!.label}</div>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        )}
 
                         {/* Mode Selection */}
                         <div>
                             <label className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2 block">{t.dt_mode}</label>
-                            <div className="grid grid-cols-3 gap-2">
+                            <div className="grid grid-cols-2 gap-2">
                                 <button 
                                     onClick={() => setMode('resize')}
                                     className={`py-2 px-1 rounded-lg border text-[10px] font-medium flex flex-col items-center justify-center gap-1 transition-colors ${mode === 'resize' ? 'bg-rose-50 border-rose-200 text-rose-700' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'}`}
@@ -582,10 +873,21 @@ ${customPrompt ? `Additional instructions: ${customPrompt}` : ''}`;
                                 >
                                     <Sparkles size={14}/> {t.dt_reimagine}
                                 </button>
+                                <button 
+                                    onClick={() => setMode('remix')}
+                                    className={`py-2 px-1 rounded-lg border text-[10px] font-medium flex flex-col items-center justify-center gap-1 transition-colors ${mode === 'remix' ? 'bg-rose-50 border-rose-200 text-rose-700' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'}`}
+                                >
+                                    <Box size={14}/> Remix
+                                </button>
                             </div>
                             {mode === 'reimagine' && (
                                 <p className="text-[10px] text-gray-500 mt-2 leading-tight bg-blue-50 p-2 rounded border border-blue-100">
                                     {t.dt_reimagine_desc}
+                                </p>
+                            )}
+                            {mode === 'remix' && (
+                                <p className="text-[10px] text-gray-500 mt-2 leading-tight bg-blue-50 p-2 rounded border border-blue-100">
+                                    Combine multiple products, a scenario, and a layout into a new image.
                                 </p>
                             )}
                         </div>
@@ -653,7 +955,7 @@ ${customPrompt ? `Additional instructions: ${customPrompt}` : ''}`;
                         </div>
 
                         {/* Resize or Reimagine Specific Controls */}
-                        {(mode === 'resize' || mode === 'reimagine') && (
+                        {(mode === 'resize' || mode === 'reimagine' || mode === 'remix') && (
                             <>
                                 <div>
                                     <label className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2 block">{t.dt_aspect_ratio}</label>
@@ -707,19 +1009,61 @@ ${customPrompt ? `Additional instructions: ${customPrompt}` : ''}`;
                         {/* Custom Prompt */}
                         <div>
                             <label className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2 block">{t.dt_instructions}</label>
+                            
+                            {mode === 'remix' && remixAssets.length > 0 && (
+                                <div className="mb-3">
+                                    <div className="text-[10px] text-gray-500 mb-1.5 flex items-center justify-between">
+                                        <span>Available Assets</span>
+                                        <span className="text-gray-400">Click or drag to insert</span>
+                                    </div>
+                                    <div className="flex flex-wrap gap-x-2 gap-y-4 pb-2">
+                                        {remixAssets.map(asset => (
+                                            <div 
+                                                key={asset.id} 
+                                                className="relative w-8 h-8 border border-gray-200 rounded bg-white cursor-grab active:cursor-grabbing hover:border-indigo-300 transition-colors"
+                                                draggable
+                                                onDragStart={(e) => {
+                                                    e.dataTransfer.setData('text/plain', ` ${asset.label} `);
+                                                }}
+                                                onClick={() => {
+                                                    setCustomPrompt(prev => prev + (prev ? ' ' : '') + asset.label + ' ');
+                                                }}
+                                                title={`Click or drag to insert ${asset.label}`}
+                                            >
+                                                <img src={asset.preview} className="w-full h-full object-contain p-0.5" />
+                                                <div className="absolute -bottom-3.5 left-1/2 -translate-x-1/2 text-[7px] whitespace-nowrap text-gray-500">{asset.label}</div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
                             <textarea 
                                 className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-rose-500 outline-none resize-none"
                                 rows={3}
-                                placeholder="E.g., Make the background more vibrant..."
+                                placeholder={mode === 'remix' ? "Drag and drop images here to reference them inline..." : "E.g., Make the background more vibrant..."}
                                 value={customPrompt}
                                 onChange={(e) => setCustomPrompt(e.target.value)}
+                                onDrop={handleTextareaDrop}
+                                onDragOver={(e) => e.preventDefault()}
                             />
+                            {mode === 'remix' && remixAssets.filter(a => a.role === 'inline').length > 0 && (
+                                <div className="mt-2 flex flex-wrap gap-2">
+                                    {remixAssets.filter(a => a.role === 'inline').map(asset => (
+                                        <div key={asset.id} className="relative w-10 h-10 border border-gray-200 rounded bg-white group">
+                                            <img src={asset.preview} className="w-full h-full object-contain p-1" />
+                                            <button onClick={() => removeRemixAsset(asset.id)} className="absolute -top-1 -right-1 bg-red-500 text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100"><X size={10}/></button>
+                                            <div className="absolute -bottom-4 left-1/2 -translate-x-1/2 text-[8px] whitespace-nowrap text-gray-500">{asset.label}</div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
                         </div>
 
                         {/* Action Button */}
                         <button 
-                            onClick={processImages}
-                            disabled={images.length === 0 || isProcessingBatch}
+                            onClick={() => processImages()}
+                            disabled={(mode !== 'remix' && images.length === 0) || (mode === 'remix' && remixAssets.length === 0) || isProcessingBatch}
                             className="w-full bg-gradient-to-r from-rose-600 to-pink-600 text-white py-3 rounded-xl font-bold shadow-md hover:shadow-lg transition-all disabled:opacity-50 flex items-center justify-center gap-2"
                         >
                             {isProcessingBatch ? <Loader2 size={18} className="animate-spin"/> : <Sparkles size={18}/>}
@@ -729,35 +1073,120 @@ ${customPrompt ? `Additional instructions: ${customPrompt}` : ''}`;
                 </div>
 
                 {/* Main Content - Image Grid */}
-                <div className="flex-1 flex flex-col h-full overflow-hidden">
+                <div className="flex-1 flex flex-col h-full overflow-hidden relative">
+                    {showHistory ? (
+                        <div className="absolute inset-0 bg-slate-50 z-20 flex flex-col">
+                            <div className="bg-white border-b border-gray-200 p-4 flex justify-between items-center shrink-0">
+                                <div className="flex items-center gap-4">
+                                    <button 
+                                        onClick={() => setShowHistory(false)}
+                                        className="flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-200 transition-colors"
+                                    >
+                                        <ChevronLeft size={16}/> Back
+                                    </button>
+                                    <h2 className="text-lg font-bold text-gray-900">Generation History</h2>
+                                </div>
+                                <button 
+                                    onClick={async () => {
+                                        if (confirm("Are you sure you want to clear all history?")) {
+                                            await clearHistory();
+                                            setHistoryItems([]);
+                                        }
+                                    }}
+                                    className="flex items-center gap-2 px-4 py-2 bg-red-50 text-red-600 rounded-lg text-sm font-medium hover:bg-red-100 transition-colors"
+                                >
+                                    <Trash2 size={16}/> Clear All
+                                </button>
+                            </div>
+                            <div className="flex-1 overflow-y-auto p-6 custom-scrollbar">
+                                {historyItems.length === 0 ? (
+                                    <div className="h-full flex flex-col items-center justify-center text-gray-400">
+                                        <History size={48} className="mb-4 opacity-20"/>
+                                        <p>No history found.</p>
+                                    </div>
+                                ) : (
+                                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                                        {historyItems.map(item => (
+                                            <div key={item.id} className="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm flex flex-col">
+                                                <div className="p-3 border-b border-gray-100 flex justify-between items-center bg-gray-50">
+                                                    <span className="text-xs font-bold text-gray-600 uppercase tracking-wider">{item.mode}</span>
+                                                    <span className="text-[10px] text-gray-400">{new Date(item.timestamp).toLocaleString()}</span>
+                                                </div>
+                                                <div className="relative aspect-square bg-gray-100 border-b border-gray-100">
+                                                    <img src={item.originalImage} className="w-full h-full object-contain p-2" />
+                                                    <div className="absolute top-2 left-2 bg-black/50 text-white text-[10px] px-2 py-1 rounded backdrop-blur-sm">Original</div>
+                                                </div>
+                                                <div className="relative aspect-square bg-gray-50 flex items-center justify-center">
+                                                    <img 
+                                                        src={item.resultImage} 
+                                                        className="w-full h-full object-contain p-2 cursor-zoom-in" 
+                                                        onClick={() => setLightboxUrl(item.resultImage)}
+                                                    />
+                                                    <div className="absolute top-2 left-2 bg-green-500/90 text-white text-[10px] px-2 py-1 rounded backdrop-blur-sm flex items-center gap-1">
+                                                        <CheckCircle size={10}/> Generated
+                                                    </div>
+                                                    <button 
+                                                        onClick={async () => {
+                                                            await deleteHistoryItem(item.id);
+                                                            setHistoryItems(prev => prev.filter(i => i.id !== item.id));
+                                                        }}
+                                                        className="absolute top-2 right-2 bg-white/90 hover:bg-red-50 text-gray-700 hover:text-red-600 p-1.5 rounded shadow-sm transition-colors z-10"
+                                                        title="Delete"
+                                                    >
+                                                        <Trash2 size={14}/>
+                                                    </button>
+                                                </div>
+                                                {item.prompt && (
+                                                    <div className="p-3 bg-gray-50 border-t border-gray-100 text-xs text-gray-600 line-clamp-2" title={item.prompt}>
+                                                        {item.prompt}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    ) : (
+                    <>
                     {/* Toolbar */}
                     <div className="bg-white border-b border-gray-200 p-4 flex justify-between items-center shrink-0">
                         <div className="flex items-center gap-4">
-                            <button 
-                                onClick={() => fileInputRef.current?.click()}
-                                className="flex items-center gap-2 px-4 py-2 bg-gray-900 text-white rounded-lg text-sm font-medium hover:bg-gray-800 transition-colors"
-                            >
-                                <UploadCloud size={16}/> {t.dt_upload}
-                                <input 
-                                    type="file" 
-                                    ref={fileInputRef} 
-                                    className="hidden" 
-                                    multiple 
-                                    accept="image/*"
-                                    onChange={handleFileUpload}
-                                />
-                            </button>
-                            <span className="text-sm text-gray-500">{images.length} {t.dt_selected}</span>
+                            {mode !== 'remix' && (
+                                <button 
+                                    onClick={() => fileInputRef.current?.click()}
+                                    className="flex items-center gap-2 px-4 py-2 bg-gray-900 text-white rounded-lg text-sm font-medium hover:bg-gray-800 transition-colors"
+                                >
+                                    <UploadCloud size={16}/> {t.dt_upload}
+                                    <input 
+                                        type="file" 
+                                        ref={fileInputRef} 
+                                        className="hidden" 
+                                        multiple 
+                                        accept="image/*"
+                                        onChange={handleFileUpload}
+                                    />
+                                </button>
+                            )}
+                            <span className="text-sm text-gray-500">{images.length} {mode === 'remix' ? 'Generated' : t.dt_selected}</span>
                         </div>
                         
-                        {images.some(img => img.status === 'success') && (
-                            <button 
-                                onClick={downloadAll}
-                                className="flex items-center gap-2 px-4 py-2 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-lg text-sm font-bold hover:bg-indigo-100 transition-colors"
+                        <div className="flex items-center gap-2">
+                            <button
+                                onClick={() => setShowHistory(true)}
+                                className="flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-700 border border-gray-200 rounded-lg text-sm font-bold hover:bg-gray-200 transition-colors"
                             >
-                                <Download size={16}/> {t.dt_download_all}
+                                <History size={16}/> History
                             </button>
-                        )}
+                            {images.some(img => img.status === 'success') && (
+                                <button 
+                                    onClick={downloadAll}
+                                    className="flex items-center gap-2 px-4 py-2 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-lg text-sm font-bold hover:bg-indigo-100 transition-colors"
+                                >
+                                    <Download size={16}/> {t.dt_download_all}
+                                </button>
+                            )}
+                        </div>
                     </div>
 
                     {/* Grid */}
@@ -765,7 +1194,7 @@ ${customPrompt ? `Additional instructions: ${customPrompt}` : ''}`;
                         {images.length === 0 ? (
                             <div className="h-full flex flex-col items-center justify-center text-gray-400">
                                 <ImageIcon size={48} className="mb-4 opacity-20"/>
-                                <p>{t.dt_empty_state}</p>
+                                <p>{mode === 'remix' ? "Add Remix Assets and click Generate" : t.dt_empty_state}</p>
                             </div>
                         ) : (
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
@@ -808,6 +1237,14 @@ ${customPrompt ? `Additional instructions: ${customPrompt}` : ''}`;
                                                     <div className="absolute top-2 left-2 bg-green-500/90 text-white text-[10px] px-2 py-1 rounded backdrop-blur-sm flex items-center gap-1">
                                                         <CheckCircle size={10}/> {t.dt_generated}
                                                     </div>
+                                                    <button
+                                                        onClick={() => processImages(img.id)}
+                                                        disabled={isProcessingBatch}
+                                                        className="absolute top-2 right-10 bg-white/90 hover:bg-white text-gray-700 p-1.5 rounded shadow-sm transition-colors z-10 disabled:opacity-50"
+                                                        title="Regenerate"
+                                                    >
+                                                        <RefreshCw size={14}/>
+                                                    </button>
                                                     {img.debugPayload && (
                                                         <button 
                                                             onClick={() => setDebugModalPayload(img.debugPayload)}
@@ -837,6 +1274,8 @@ ${customPrompt ? `Additional instructions: ${customPrompt}` : ''}`;
                             </div>
                         )}
                     </div>
+                    </>
+                    )}
                 </div>
             </div>
 

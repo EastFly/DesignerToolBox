@@ -1,10 +1,11 @@
 
-import React, { useMemo, useState } from 'react';
-import { BarChart2, PlayCircle, CheckCircle, Clock, Calendar, FileImage, Users, Filter, ChevronDown, Zap } from 'lucide-react';
+import React, { useMemo, useState, useEffect } from 'react';
+import { BarChart2, PlayCircle, CheckCircle, Clock, Calendar, FileImage, Users, Filter, ChevronDown, Zap, Database } from 'lucide-react';
 import { Task, StageDef, FullUserProfile, Priority, ProductLevel, TaskDifficulty } from '../types';
 import { Language, translations } from '../i18n';
 import { PRODUCT_LEVEL_WEIGHTS, DIFFICULTY_WEIGHTS } from '../constants';
 import { format, isSameDay, isSameWeek, endOfWeek, isWithinInterval } from 'date-fns';
+import { db } from '../services/db';
 
 interface StatsViewProps {
   tasks: Task[];

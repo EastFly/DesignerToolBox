@@ -145,9 +145,25 @@ export const NewTaskModal: React.FC<NewTaskModalProps> = ({
   };
 
   // Get fields visible in the CREATION STAGE
-  const visibleFields = allFields.filter(f => {
+  const unsortedVisibleFields = allFields.filter(f => {
       const config = getFieldConfig(f.key);
       return config.visible;
+  });
+
+  // Apply layout sorting
+  let creationLayout = currentTypeConfig?.stageLayouts?.['creation'] || [];
+  
+  // Inheritance: If no layout exists for creation, it's the first stage, so no inheritance to apply here.
+  // Wait, creation is the first stage, so it doesn't inherit from anything.
+  const layoutItems = creationLayout.length > 0 ? creationLayout : unsortedVisibleFields.map(f => ({ key: f.key, width: 'full' }));
+  
+  const visibleFields = [...unsortedVisibleFields].sort((a, b) => {
+      const indexA = layoutItems.findIndex(item => item.key === a.key);
+      const indexB = layoutItems.findIndex(item => item.key === b.key);
+      if (indexA === -1 && indexB === -1) return 0;
+      if (indexA === -1) return 1;
+      if (indexB === -1) return -1;
+      return indexA - indexB;
   });
 
   const isFormValid = useMemo(() => {
@@ -455,6 +471,7 @@ export const NewTaskModal: React.FC<NewTaskModalProps> = ({
 
       switch (field.type) {
           case 'select':
+          case 'multiselect':
               return (
                   <select className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm" value={val || ''} onChange={e => setFormState({...formState, [compositeKey]: e.target.value})}>
                       <option value="">Select...</option>
@@ -604,8 +621,9 @@ export const NewTaskModal: React.FC<NewTaskModalProps> = ({
                     </div>
                     {visibleFields.map(field => {
                         const config = getFieldConfig(field.key);
+                        const layoutItem = layoutItems.find(item => item.key === field.key);
                         // Folders should span full width
-                        const isFullWidth = field.type === 'folder' || field.type === 'textarea' || field.type === 'richtext' || field.key === 'sellingPoints';
+                        const isFullWidth = layoutItem ? layoutItem.width === 'full' : (field.type === 'folder' || field.type === 'textarea' || field.type === 'richtext' || field.key === 'sellingPoints');
                         const isSynced = field.isProductField && selectedProductId;
 
                         return (

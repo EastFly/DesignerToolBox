@@ -8,6 +8,7 @@ import { UserManager } from './UserManager';
 import { GoogleGenAI } from '@google/genai';
 import { SetupWizard } from './SetupWizard'; // Import Wizard
 import { db } from '../services/db'; // Import DB
+import { ModelUsageView } from './ModelUsageView';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -30,7 +31,13 @@ interface SettingsModalProps {
   onSystemReset: () => Promise<void>;
   
   // Permissions
+  canManageTaskTypes: boolean;
+  canManageGlobalFields: boolean;
+  canManageGlobalStages: boolean;
+  canManageRoles: boolean;
   canManageUsers: boolean;
+  canManageSystem: boolean;
+  canManageModelUsage: boolean;
 }
 
 const STAGE_COLORS = [
@@ -47,11 +54,24 @@ const STAGE_COLORS = [
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({ 
   isOpen, onClose, language, 
-  taskTypes, onSaveTaskTypes, roles, setRoles, users, setUsers, canManageUsers,
+  taskTypes, onSaveTaskTypes, roles, setRoles, users, setUsers, 
+  canManageTaskTypes, canManageGlobalFields, canManageGlobalStages, canManageRoles, canManageUsers, canManageSystem, canManageModelUsage,
   allStages, allFields, onSaveSystemSettings, currentUser, onSystemReset
 }) => {
   const t = translations[language];
-  const [activeTab, setActiveTab] = useState<'types' | 'fields' | 'stages' | 'roles' | 'users' | 'system'>('types');
+  const [activeTab, setActiveTab] = useState<'types' | 'fields' | 'stages' | 'roles' | 'users' | 'system' | 'usage'>('types');
+  
+  useEffect(() => {
+      if (isOpen) {
+          if (canManageTaskTypes) setActiveTab('types');
+          else if (canManageGlobalFields) setActiveTab('fields');
+          else if (canManageGlobalStages) setActiveTab('stages');
+          else if (canManageRoles) setActiveTab('roles');
+          else if (canManageUsers) setActiveTab('users');
+          else if (canManageSystem) setActiveTab('system');
+          else if (canManageModelUsage) setActiveTab('usage');
+      }
+  }, [isOpen, canManageTaskTypes, canManageGlobalFields, canManageGlobalStages, canManageRoles, canManageUsers, canManageSystem, canManageModelUsage]);
   
   // Local Config State
   const [localTypes, setLocalTypes] = useState<TaskTypeConfig[]>(JSON.parse(JSON.stringify(taskTypes)));
@@ -266,7 +286,23 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           .map(f => f.key);
 
       // Get existing layout config
-      const existingLayout = currentType.stageLayouts?.[stageId] || [];
+      let existingLayout = currentType.stageLayouts?.[stageId] || [];
+      
+      // Inheritance: If no layout exists for this stage, inherit from previous stages
+      if (existingLayout.length === 0) {
+          const sequence = ['creation', ...(currentType.workflow || [])];
+          const currentIndex = sequence.indexOf(stageId);
+          if (currentIndex > 0) {
+              for (let i = currentIndex - 1; i >= 0; i--) {
+                  const prevStageId = sequence[i];
+                  const prevLayout = currentType.stageLayouts?.[prevStageId];
+                  if (prevLayout && prevLayout.length > 0) {
+                      existingLayout = prevLayout;
+                      break;
+                  }
+              }
+          }
+      }
       
       // Merge: Keep existing layout items if they are still visible, append new visible fields
       const mergedLayout: FieldLayoutItem[] = [];
@@ -287,7 +323,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
       setTempLayout(mergedLayout);
       const stage = localStages.find(s => s.id === stageId);
-      setLayoutEditorStage({ stageId, stageName: stage ? getStageTitle(stage) : stageId });
+      setLayoutEditorStage({ stageId, stageName: stage ? getStageTitle(stage) : (stageId === 'creation' ? t.creation_form : stageId) });
   };
 
   const saveLayout = () => {
@@ -454,10 +490,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                           className={`w-full text-left p-3 rounded-lg border mb-2 flex items-center gap-2 hover:bg-gray-50 ${!currentFlowId ? 'border-gray-300 bg-gray-50' : 'border-transparent'}`}
                       >
                           <Unlink size={16} className="text-gray-400"/>
-                          <span className="text-sm font-medium text-gray-600">No Automation</span>
+                          <span className="text-sm font-medium text-gray-600">{t.set_flow_no_automation}</span>
                       </button>
                       
-                      {availableFlows.length === 0 && <div className="text-center text-xs text-gray-400 py-4">No flows created yet. Go to Prompt Builder.</div>}
+                      {availableFlows.length === 0 && <div className="text-center text-xs text-gray-400 py-4">{t.set_flow_no_flows}</div>}
 
                       {availableFlows.map(flow => (
                           <button 
@@ -470,7 +506,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                               </div>
                               <div>
                                   <div className={`text-sm font-bold ${currentFlowId === flow.id ? 'text-indigo-900' : 'text-gray-800'}`}>{flow.name}</div>
-                                  <div className="text-[10px] text-gray-500">{flow.nodes.length} nodes</div>
+                                  <div className="text-[10px] text-gray-500">{flow.nodes.length} {t.set_flow_nodes}</div>
                               </div>
                           </button>
                       ))}
@@ -490,15 +526,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   <div className="bg-white border-b border-gray-200 p-4 flex justify-between items-center">
                       <h3 className="font-bold text-gray-800 flex items-center gap-2">
                           <LayoutGrid size={18} className="text-indigo-600"/> 
-                          Layout Editor: {layoutEditorStage.stageName}
+                          {t.set_layout_editor}: {layoutEditorStage.stageName}
                       </h3>
                       <button onClick={() => setLayoutEditorStage(null)} className="text-gray-400 hover:text-gray-600"><X size={20}/></button>
                   </div>
                   
                   <div className="bg-gray-50 p-4 flex-1 overflow-y-auto custom-scrollbar">
                       <p className="text-xs text-gray-500 mb-4 bg-blue-50 border border-blue-100 p-2 rounded text-blue-700">
-                          Drag to reorder fields. Click the expand/collapse icon to toggle width. 
-                          Only visible fields are shown.
+                          {t.set_layout_editor_desc}
                       </p>
                       
                       <div className="space-y-2">
@@ -532,15 +567,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                                                   ? 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
                                                   : 'bg-indigo-50 text-indigo-600 border-indigo-200 hover:bg-indigo-100'
                                           }`}
-                                          title={isLockedFull ? "Locked to Full Width" : item.width === 'half' ? "Switch to Full Width" : "Switch to Half Width"}
+                                          title={isLockedFull ? t.set_layout_locked_full : item.width === 'half' ? t.set_layout_switch_full : t.set_layout_switch_half}
                                       >
                                           {item.width === 'half' ? <Minimize size={12}/> : <Maximize size={12}/>}
-                                          {item.width === 'half' ? 'Half' : 'Full'}
+                                          {item.width === 'half' ? t.set_layout_half : t.set_layout_full}
                                       </button>
                                   </div>
                               );
                           })}
-                          {tempLayout.length === 0 && <div className="text-center text-gray-400 py-10 italic">No visible fields in this stage.</div>}
+                          {tempLayout.length === 0 && <div className="text-center text-gray-400 py-10 italic">{t.set_layout_no_visible}</div>}
                       </div>
                   </div>
 
@@ -582,26 +617,39 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         {/* Header with Tabs */}
         <div className="bg-gray-800 flex justify-between items-center text-white shrink-0 pr-6">
           <div className="flex overflow-x-auto">
-             <button onClick={() => setActiveTab('types')} className={`px-5 py-5 font-bold flex items-center gap-2 ${activeTab === 'types' ? 'bg-white text-gray-800' : 'text-gray-300 hover:bg-gray-700'}`}>
-                <Layout size={18} /> {t.configureTypes}
-             </button>
-             <button onClick={() => setActiveTab('fields')} className={`px-5 py-5 font-bold flex items-center gap-2 ${activeTab === 'fields' ? 'bg-white text-gray-800' : 'text-gray-300 hover:bg-gray-700'}`}>
-                <List size={18} /> {t.tab_fields}
-             </button>
-             <button onClick={() => setActiveTab('stages')} className={`px-5 py-5 font-bold flex items-center gap-2 ${activeTab === 'stages' ? 'bg-white text-gray-800' : 'text-gray-300 hover:bg-gray-700'}`}>
-                <Layers size={18} /> {t.tab_stages}
-             </button>
-             <button onClick={() => setActiveTab('roles')} className={`px-5 py-5 font-bold flex items-center gap-2 ${activeTab === 'roles' ? 'bg-white text-gray-800' : 'text-gray-300 hover:bg-gray-700'}`}>
-                <Users size={18} /> {t.tab_roles}
-             </button>
+             {canManageTaskTypes && (
+                 <button onClick={() => setActiveTab('types')} className={`px-5 py-5 font-bold flex items-center gap-2 ${activeTab === 'types' ? 'bg-white text-gray-800' : 'text-gray-300 hover:bg-gray-700'}`}>
+                    <Layout size={18} /> {t.configureTypes}
+                 </button>
+             )}
+             {canManageGlobalFields && (
+                 <button onClick={() => setActiveTab('fields')} className={`px-5 py-5 font-bold flex items-center gap-2 ${activeTab === 'fields' ? 'bg-white text-gray-800' : 'text-gray-300 hover:bg-gray-700'}`}>
+                    <List size={18} /> {t.tab_fields}
+                 </button>
+             )}
+             {canManageGlobalStages && (
+                 <button onClick={() => setActiveTab('stages')} className={`px-5 py-5 font-bold flex items-center gap-2 ${activeTab === 'stages' ? 'bg-white text-gray-800' : 'text-gray-300 hover:bg-gray-700'}`}>
+                    <Layers size={18} /> {t.tab_stages}
+                 </button>
+             )}
+             {canManageRoles && (
+                 <button onClick={() => setActiveTab('roles')} className={`px-5 py-5 font-bold flex items-center gap-2 ${activeTab === 'roles' ? 'bg-white text-gray-800' : 'text-gray-300 hover:bg-gray-700'}`}>
+                    <Users size={18} /> {t.tab_roles}
+                 </button>
+             )}
              {canManageUsers && (
                  <button onClick={() => setActiveTab('users')} className={`px-5 py-5 font-bold flex items-center gap-2 ${activeTab === 'users' ? 'bg-white text-gray-800' : 'text-gray-300 hover:bg-gray-700'}`}>
                     <UserCog size={18} /> {t.tab_users}
                  </button>
              )}
-             {isAdmin && (
+             {canManageSystem && (
                  <button onClick={() => setActiveTab('system')} className={`px-5 py-5 font-bold flex items-center gap-2 ${activeTab === 'system' ? 'bg-white text-red-600 border-b-2 border-red-600' : 'text-gray-300 hover:bg-gray-700 hover:text-red-400'}`}>
                     <ShieldAlert size={18} /> {t.tab_system}
+                 </button>
+             )}
+             {canManageModelUsage && (
+                 <button onClick={() => setActiveTab('usage')} className={`px-5 py-5 font-bold flex items-center gap-2 ${activeTab === 'usage' ? 'bg-white text-indigo-600 border-b-2 border-indigo-600' : 'text-gray-300 hover:bg-gray-700 hover:text-indigo-400'}`}>
+                    <Database size={18} /> {t.tab_model_usage}
                  </button>
              )}
           </div>
@@ -645,10 +693,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                                 {/* Active Path */}
                                 <div>
                                     <h4 className="text-xs font-bold text-indigo-800 uppercase mb-2 flex items-center gap-1">
-                                        <Layers size={12}/> Active Workflow Path
+                                        <Layers size={12}/> {t.set_layout_active_path}
                                     </h4>
                                     <div className="flex flex-wrap gap-2 items-center bg-white p-2 rounded-lg border border-gray-200 min-h-[40px]">
-                                        {currentType.workflow.length === 0 && <span className="text-xs text-gray-400 italic p-1">No active stages. Click below to add.</span>}
+                                        {currentType.workflow.length === 0 && <span className="text-xs text-gray-400 italic p-1">{t.set_layout_no_active}</span>}
                                         
                                         {currentType.workflow.map((stageId, idx) => {
                                             const stage = localStages.find(s => s.id === stageId);
@@ -693,7 +741,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                                 {/* Available Stages */}
                                 <div>
                                     <h4 className="text-xs font-bold text-gray-500 uppercase mb-2 flex items-center gap-1">
-                                        <Plus size={12}/> Available Stages
+                                        <Plus size={12}/> {t.set_layout_available}
                                     </h4>
                                     <div className="flex flex-wrap gap-2">
                                         {localStages.filter(s => !currentType.workflow.includes(s.id)).map(stage => (
@@ -707,7 +755,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                                             </button>
                                         ))}
                                         {localStages.filter(s => !currentType.workflow.includes(s.id)).length === 0 && (
-                                            <span className="text-xs text-gray-400 italic">All stages used.</span>
+                                            <span className="text-xs text-gray-400 italic">{t.set_layout_all_used}</span>
                                         )}
                                     </div>
                                 </div>
@@ -724,6 +772,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                                             <th className="sticky top-0 bg-white z-10 border-b-2 border-gray-200 p-2 text-center min-w-[120px] bg-indigo-50/50">
                                                 <div className="text-xs px-2 py-1 rounded bg-indigo-100 text-indigo-800 border border-indigo-200 inline-block font-bold">
                                                     {t.creation_form}
+                                                </div>
+                                                <div className="mt-2 flex justify-center gap-1">
+                                                    <button 
+                                                        onClick={() => openLayoutEditor('creation')}
+                                                        className={`p-1.5 rounded border transition-all ${currentType.stageLayouts?.['creation']?.length ? 'bg-indigo-100 border-indigo-300 text-indigo-600' : 'bg-white border-gray-200 text-gray-300 hover:text-gray-500 hover:border-gray-300'}`}
+                                                        title={t.set_layout_config}
+                                                    >
+                                                        <LayoutGrid size={14} />
+                                                    </button>
                                                 </div>
                                             </th>
                                             {currentType.workflow.map((stageId, index) => {
@@ -744,14 +801,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                                                             <button 
                                                                 onClick={() => setFlowSelectorStageId(stageId)}
                                                                 className={`p-1.5 rounded border transition-all ${linkedFlow ? 'bg-indigo-100 border-indigo-300 text-indigo-600' : 'bg-white border-gray-200 text-gray-300 hover:text-gray-500 hover:border-gray-300'}`}
-                                                                title={linkedFlow ? `Linked: ${linkedFlow.name}` : "Link Prompt Flow"}
+                                                                title={linkedFlow ? `${t.set_layout_linked} ${linkedFlow.name}` : t.set_layout_link_flow}
                                                             >
                                                                 <Workflow size={14} />
                                                             </button>
                                                             <button 
                                                                 onClick={() => openLayoutEditor(stageId)}
                                                                 className={`p-1.5 rounded border transition-all ${hasLayout ? 'bg-indigo-100 border-indigo-300 text-indigo-600' : 'bg-white border-gray-200 text-gray-300 hover:text-gray-500 hover:border-gray-300'}`}
-                                                                title="Configure Field Layout"
+                                                                title={t.set_layout_config}
                                                             >
                                                                 <LayoutGrid size={14} />
                                                             </button>
@@ -770,8 +827,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                                                     <div className="flex items-center text-[10px] text-gray-400 font-mono mt-0.5">
                                                         {getSectionIcon(field.section)}
                                                         {getSectionName(field.section)}
-                                                        {field.type === 'folder' && <span className="ml-2 bg-yellow-100 text-yellow-700 px-1 rounded text-[9px] uppercase font-bold flex items-center"><FolderIcon size={8} className="mr-0.5"/> Folder</span>}
-                                                        {field.isProductField && <span className="ml-2 bg-cyan-100 text-cyan-700 px-1 rounded text-[9px] uppercase font-bold flex items-center" title="Synced with Product"><Package size={8} className="mr-0.5"/> Product</span>}
+                                                        {field.type === 'folder' && <span className="ml-2 bg-yellow-100 text-yellow-700 px-1 rounded text-[9px] uppercase font-bold flex items-center"><FolderIcon size={8} className="mr-0.5"/> {t.set_layout_folder}</span>}
+                                                        {field.isProductField && <span className="ml-2 bg-cyan-100 text-cyan-700 px-1 rounded text-[9px] uppercase font-bold flex items-center" title={t.set_layout_synced}><Package size={8} className="mr-0.5"/> {t.set_layout_product}</span>}
                                                     </div>
                                                 </td>
 
@@ -887,8 +944,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   <div className="p-6 border-b border-gray-200 bg-white shrink-0">
                       <div className="flex justify-between items-center mb-6">
                           <div>
-                            <h3 className="text-xl font-bold text-gray-800">Global Field Registry</h3>
-                            <p className="text-sm text-gray-500 mt-1">Define standard fields available across all task types. Set <strong>Semantic Descriptions</strong> here to help AI understand your data.</p>
+                            <h3 className="text-xl font-bold text-gray-800">{t.set_global_field_title}</h3>
+                            <p className="text-sm text-gray-500 mt-1">{t.set_global_field_desc}</p>
                           </div>
                           <button onClick={handleAddField} className="bg-indigo-600 text-white px-4 py-2 rounded-lg font-medium shadow-sm flex items-center hover:bg-indigo-700 transition-colors">
                               <Plus size={18} className="mr-2"/> Add Field
@@ -924,15 +981,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                                     <th className="p-4">{t.th_label}</th>
                                     <th className="p-4">{t.th_type}</th>
                                     <th className="p-4">{t.th_section}</th>
-                                    <th className="p-4 text-center">Sync</th>
-                                    <th className="p-4 text-center">Config</th>
+                                    <th className="p-4 text-center">{t.set_sync}</th>
+                                    <th className="p-4 text-center">{t.set_config}</th>
                                     <th className="p-4 text-center">{t.th_actions}</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 {filteredFields.length === 0 ? (
                                     <tr>
-                                        <td colSpan={7} className="p-8 text-center text-gray-400 italic">No fields found in this section.</td>
+                                        <td colSpan={7} className="p-8 text-center text-gray-400 italic">{t.set_no_fields_found}</td>
                                     </tr>
                                 ) : filteredFields.map((field, idx) => {
                                     // Find index in original array for updates
@@ -971,20 +1028,40 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                                                         const nf = [...localFields]; nf[realIdx].type = e.target.value as InputType; setLocalFields(nf);
                                                     }}
                                                 >
-                                                    <option value="text">Text (Single Line)</option>
-                                                    <option value="textarea">Text Area (Multi-line)</option>
-                                                    <option value="richtext">Rich Text (HTML)</option>
-                                                    <option value="number">Number</option>
-                                                    <option value="date">Date</option>
-                                                    <option value="datetime">Date & Time</option>
-                                                    <option value="select">Select Dropdown</option>
-                                                    <option value="multiselect">Multi-Select</option>
-                                                    <option value="image">Image Upload</option>
-                                                    <option value="video">Video Upload</option>
-                                                    <option value="file">File Upload</option>
-                                                    <option value="link">URL / Link</option>
-                                                    <option value="folder">Folder / Group</option>
+                                                    <option value="text">{t.set_field_type_text}</option>
+                                                    <option value="textarea">{t.set_field_type_textarea}</option>
+                                                    <option value="richtext">{t.set_field_type_richtext}</option>
+                                                    <option value="number">{t.set_field_type_number}</option>
+                                                    <option value="date">{t.set_field_type_date}</option>
+                                                    <option value="datetime">{t.set_field_type_datetime}</option>
+                                                    <option value="select">{t.set_field_type_select}</option>
+                                                    <option value="multiselect">{t.set_field_type_multiselect}</option>
+                                                    <option value="image">{t.set_field_type_image}</option>
+                                                    <option value="video">{t.set_field_type_video}</option>
+                                                    <option value="file">{t.set_field_type_file}</option>
+                                                    <option value="link">{t.set_field_type_link}</option>
+                                                    <option value="folder">{t.set_field_type_folder}</option>
                                                 </select>
+                                                {(field.type === 'select' || field.type === 'multiselect') && (
+                                                    <div className="mt-2">
+                                                        <input 
+                                                            className="w-full border border-gray-200 rounded px-2 py-1 text-xs" 
+                                                            placeholder="Options (comma separated)" 
+                                                            value={field.options?.join(',') || ''}
+                                                            onChange={(e) => {
+                                                                const nf = [...localFields]; 
+                                                                nf[realIdx].options = e.target.value.split(',');
+                                                                setLocalFields(nf);
+                                                            }}
+                                                            onBlur={(e) => {
+                                                                const nf = [...localFields];
+                                                                nf[realIdx].options = e.target.value.split(',').map(s => s.trim()).filter(Boolean);
+                                                                setLocalFields(nf);
+                                                            }}
+                                                            title="Enter options separated by commas"
+                                                        />
+                                                    </div>
+                                                )}
                                                 {(field.type === 'image' || field.type === 'video') && (
                                                     <div className="flex gap-2 mt-1">
                                                         <input 
@@ -1017,12 +1094,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                                                         const nf = [...localFields]; nf[realIdx].section = e.target.value as any; setLocalFields(nf);
                                                     }}
                                                 >
-                                                    <option value="identity">Identity</option>
-                                                    <option value="assets">Assets</option>
-                                                    <option value="ai_assets">AI Assets</option>
-                                                    <option value="requirements">Requirements</option>
-                                                    <option value="directives">Directives</option>
-                                                    <option value="custom">Other / Custom</option>
+                                                    <option value="identity">{t.set_section_identity}</option>
+                                                    <option value="assets">{t.set_section_assets}</option>
+                                                    <option value="ai_assets">{t.set_section_ai_assets}</option>
+                                                    <option value="requirements">{t.set_section_requirements}</option>
+                                                    <option value="directives">{t.set_section_directives}</option>
+                                                    <option value="custom">{t.set_section_custom}</option>
                                                 </select>
                                             </td>
                                             <td className="p-4 text-center">
@@ -1084,8 +1161,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           {activeTab === 'stages' && (
               <div className="w-full h-full p-8 overflow-y-auto">
                    <div className="flex justify-between mb-4">
-                      <h3 className="text-xl font-bold">{t.tab_stages}</h3>
-                      <button onClick={handleAddStage} className="bg-indigo-600 text-white px-3 py-1 rounded flex items-center"><Plus size={16} className="mr-2"/> Add Stage</button>
+                      <h3 className="text-xl font-bold">{t.set_global_stages_title}</h3>
+                      <button onClick={handleAddStage} className="bg-indigo-600 text-white px-3 py-1 rounded flex items-center"><Plus size={16} className="mr-2"/> {t.set_add_stage}</button>
                   </div>
                   <div className="max-w-3xl">
                       {localStages.map((stage, idx) => (
@@ -1096,7 +1173,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                               </div>
                               <div className="flex-1 grid grid-cols-4 gap-4">
                                   <div className="col-span-1">
-                                      <label className="text-[10px] uppercase text-gray-500 font-bold">ID</label>
+                                      <label className="text-[10px] uppercase text-gray-500 font-bold">{t.set_stage_id}</label>
                                       <input 
                                         className="w-full border border-gray-300 rounded px-2 py-1 text-sm font-mono bg-gray-50" 
                                         value={stage.id} 
@@ -1107,7 +1184,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                                       />
                                   </div>
                                   <div className="col-span-1">
-                                      <label className="text-[10px] uppercase text-gray-500 font-bold">Title</label>
+                                      <label className="text-[10px] uppercase text-gray-500 font-bold">{t.set_stage_title}</label>
                                       <div className="relative">
                                           <input 
                                             className={`w-full border border-gray-300 rounded px-2 py-1 text-sm font-bold ${isSystemStage(stage.id) ? 'bg-gray-100 text-gray-600' : ''}`}
@@ -1125,7 +1202,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                                       </div>
                                   </div>
                                   <div className="col-span-1">
-                                      <label className="text-[10px] uppercase text-gray-500 font-bold">Color Class</label>
+                                      <label className="text-[10px] uppercase text-gray-500 font-bold">{t.set_stage_color}</label>
                                       <select 
                                           className="w-full border border-gray-300 rounded px-2 py-1 text-sm" 
                                           value={stage.color} 
@@ -1140,7 +1217,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                                       <div className={`mt-1 h-1 w-full rounded ${stage.color}`}></div>
                                   </div>
                                   <div className="col-span-1">
-                                      <label className="text-[10px] uppercase text-gray-500 font-bold">Default Role</label>
+                                      <label className="text-[10px] uppercase text-gray-500 font-bold">{t.set_stage_role}</label>
                                       <select 
                                           className="w-full border border-gray-300 rounded px-2 py-1 text-sm" 
                                           value={stage.role} 
@@ -1148,7 +1225,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                                               const ns = [...localStages]; ns[idx].role = e.target.value; setLocalStages(ns);
                                           }} 
                                       >
-                                          <option value="All">All / Anyone</option>
+                                          <option value="All">{t.set_role_all}</option>
                                           {roles.map(r => (
                                               <option key={r.id} value={r.id}>{r.name}</option>
                                           ))}
@@ -1181,9 +1258,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
                            <Database size={24} className="text-blue-600"/>
                         </div>
-                        <h2 className="text-lg font-bold text-blue-800 mb-2">Database Schema & Maintenance</h2>
+                        <h2 className="text-lg font-bold text-blue-800 mb-2">{t.set_system_db_title}</h2>
                         <p className="text-gray-500 text-sm mb-4">
-                            If you are seeing "Table not found" errors (e.g. <code>PGRST205</code>) or missing features, your database structure might be outdated.
+                            {t.set_system_db_desc}
                         </p>
                         <button 
                            onClick={() => setShowWizard(true)}
@@ -1198,9 +1275,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                        <div className="w-12 h-12 bg-red-50 rounded-full flex items-center justify-center mx-auto mb-4">
                            <AlertOctagon size={24} className="text-red-500"/>
                        </div>
-                       <h2 className="text-lg font-bold text-gray-900 mb-2">Factory Reset</h2>
+                       <h2 className="text-lg font-bold text-gray-900 mb-2">{t.set_system_reset_title}</h2>
                        <p className="text-gray-500 text-sm mb-4">
-                           This action will <strong>Delete All Tasks</strong> and reset Workflows to default. Intended for initial setup only.
+                           {t.set_system_reset_desc}
                        </p>
                        <button 
                            onClick={handleResetClick}
@@ -1214,10 +1291,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               </div>
           )}
 
+          {/* MODEL USAGE TAB */}
+          {activeTab === 'usage' && canManageModelUsage && (
+              <div className="w-full h-full">
+                  <ModelUsageView language={language} />
+              </div>
+          )}
+
         </div>
 
-        {/* Global Footer (Hidden for Users/Roles/System tab as they have inline or specific saving) */}
-        {activeTab !== 'users' && activeTab !== 'roles' && activeTab !== 'system' && (
+        {/* Global Footer (Hidden for Users/Roles/System/Usage tab as they have inline or specific saving) */}
+        {activeTab !== 'users' && activeTab !== 'roles' && activeTab !== 'system' && activeTab !== 'usage' && (
             <div className="p-4 border-t border-gray-200 bg-gray-50 flex justify-end space-x-3 shrink-0">
               {hasChanges && (
                   <button onClick={onClose} className="px-4 py-2 text-gray-600 hover:bg-gray-200 rounded-lg font-medium">{t.cancel}</button>

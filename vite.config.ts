@@ -12,6 +12,13 @@ export default defineConfig(({ mode }) => {
     if (env.API_KEY) {
         define['process.env.API_KEY'] = JSON.stringify(env.API_KEY);
     }
+    if (env.MY_GEMINI_API_KEY) {
+        define['process.env.MY_GEMINI_API_KEY'] = JSON.stringify(env.MY_GEMINI_API_KEY);
+    }
+
+    if (env.VITE_GEMINI_API_KEY) {
+        define['process.env.VITE_GEMINI_API_KEY'] = JSON.stringify(env.VITE_GEMINI_API_KEY);
+    }
 
     return {
       server: {
@@ -19,7 +26,13 @@ export default defineConfig(({ mode }) => {
         host: '0.0.0.0',
       },
       plugins: [react()],
-      define,
+      define: {
+        'process.env.API_KEY': JSON.stringify(env.GEMINI_API_KEY),
+        'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY),
+        'process.env.MY_GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY),
+        'process.env.VITE_GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY)
+        
+      },
       resolve: {
         alias: {
           '@': path.resolve(__dirname, '.'),

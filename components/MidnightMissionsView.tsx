@@ -2,7 +2,7 @@
 import React, { useEffect, useState } from 'react';
 import { MidnightMission } from '../types';
 import { db } from '../services/db';
-import { Moon, RefreshCw, CheckCircle, Loader2, AlertCircle, Clock, Package, X, Maximize2, Play } from 'lucide-react';
+import { Moon, RefreshCw, CheckCircle, Loader2, AlertCircle, Clock, Package, X, Maximize2, Play, ArrowLeft } from 'lucide-react';
 import { format } from 'date-fns';
 import { GoogleGenAI } from "@google/genai";
 
@@ -38,9 +38,15 @@ const base64ToFile = (base64Data: string, mimeType: string, filename: string): F
     return new File([byteArray], filename, { type: mimeType });
 };
 
-import { getApiKey } from '../services/geminiService';
+import { translations, Language } from '../i18n';
 
-export const MidnightMissionsView: React.FC = () => {
+interface MidnightMissionsViewProps {
+    language: Language;
+    onNavigateBack?: () => void;
+}
+
+export const MidnightMissionsView: React.FC<MidnightMissionsViewProps> = ({ language, onNavigateBack }) => {
+    const t = translations[language];
     const [missions, setMissions] = useState<MidnightMission[]>([]);
     const [isLoading, setIsLoading] = useState(false);
     const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
@@ -66,10 +72,10 @@ export const MidnightMissionsView: React.FC = () => {
 
     const getStatusBadge = (status: string) => {
         switch (status) {
-            case 'completed': return <span className="bg-green-100 text-green-700 px-2 py-1 rounded text-xs font-bold flex items-center gap-1"><CheckCircle size={12}/> Completed</span>;
-            case 'processing': return <span className="bg-blue-100 text-blue-700 px-2 py-1 rounded text-xs font-bold flex items-center gap-1"><Loader2 size={12} className="animate-spin"/> Processing</span>;
-            case 'failed': return <span className="bg-red-100 text-red-700 px-2 py-1 rounded text-xs font-bold flex items-center gap-1"><AlertCircle size={12}/> Failed</span>;
-            default: return <span className="bg-gray-100 text-gray-600 px-2 py-1 rounded text-xs font-bold flex items-center gap-1"><Clock size={12}/> Pending</span>;
+            case 'completed': return <span className="bg-green-100 text-green-700 px-2 py-1 rounded text-xs font-bold flex items-center gap-1"><CheckCircle size={12}/> {t.mm_status_completed}</span>;
+            case 'processing': return <span className="bg-blue-100 text-blue-700 px-2 py-1 rounded text-xs font-bold flex items-center gap-1"><Loader2 size={12} className="animate-spin"/> {t.mm_status_processing}</span>;
+            case 'failed': return <span className="bg-red-100 text-red-700 px-2 py-1 rounded text-xs font-bold flex items-center gap-1"><AlertCircle size={12}/> {t.mm_status_failed}</span>;
+            default: return <span className="bg-gray-100 text-gray-600 px-2 py-1 rounded text-xs font-bold flex items-center gap-1"><Clock size={12}/> {t.mm_status_pending}</span>;
         }
     };
 
@@ -77,8 +83,30 @@ export const MidnightMissionsView: React.FC = () => {
         if (mission.status === 'processing') return;
 
         try {
-            const apiKey = await getApiKey();
-            if (!apiKey) return;
+            let apiKey = '';
+            try {
+                apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY || '';
+            } catch (e) {
+                try {
+                    apiKey = process.env.API_KEY || '';
+                } catch (e2) {
+                    apiKey = '';
+                }
+            }
+            if (!apiKey && window.aistudio && await window.aistudio.hasSelectedApiKey()) {
+                apiKey = process.env.API_KEY || '';
+            } else if (!apiKey && window.aistudio) {
+                try {
+                    await window.aistudio.openSelectKey();
+                    apiKey = process.env.API_KEY || '';
+                } catch (e) {
+                    return;
+                }
+            }
+            if (!apiKey) {
+                alert("API Key is required.");
+                return;
+            }
             const ai = new GoogleGenAI({ apiKey });
 
             // 1. Mark as processing
@@ -116,6 +144,8 @@ export const MidnightMissionsView: React.FC = () => {
                             }
                         }
                     });
+
+                    db.logModelUsage('MidnightMissions', task.model, { type: 'image_generation', config: { imageConfig: { aspectRatio: task.config.aspectRatio, imageSize: task.config.imageSize } } }).catch(console.error);
 
                     let outputUrl = '';
                     for (const part of response.candidates?.[0]?.content?.parts || []) {
@@ -160,7 +190,7 @@ export const MidnightMissionsView: React.FC = () => {
             const failedMission = { ...mission, status: 'failed' as const, updatedAt: new Date() };
             await db.updateMidnightMission(failedMission);
             setMissions(prev => prev.map(m => m.id === mission.id ? failedMission : m));
-            alert("Mission execution failed: " + e.message);
+            alert(`${t.mm_exec_fail}: ` + e.message);
         }
     };
 
@@ -168,14 +198,25 @@ export const MidnightMissionsView: React.FC = () => {
         <div className="flex flex-col h-full bg-slate-50">
             {/* Header */}
             <div className="bg-white border-b border-gray-200 px-8 py-6 shrink-0 flex justify-between items-center">
-                <div>
-                    <h2 className="text-2xl font-bold text-gray-800 flex items-center gap-3">
-                        <div className="p-2 bg-indigo-900 text-white rounded-lg shadow-lg shadow-indigo-200">
-                            <Moon size={24} fill="currentColor" />
-                        </div>
-                        Midnight Missions
-                    </h2>
-                    <p className="text-gray-500 text-sm mt-1 ml-14">Background generation queue managed by Agents.</p>
+                <div className="flex items-center gap-4">
+                    {onNavigateBack && (
+                        <button 
+                            onClick={onNavigateBack}
+                            className="p-2 text-gray-500 hover:text-gray-900 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
+                            title="Back to Dice Storm"
+                        >
+                            <ArrowLeft size={20} />
+                        </button>
+                    )}
+                    <div>
+                        <h2 className="text-2xl font-bold text-gray-800 flex items-center gap-3">
+                            <div className="p-2 bg-indigo-900 text-white rounded-lg shadow-lg shadow-indigo-200">
+                                <Moon size={24} fill="currentColor" />
+                            </div>
+                            {t.mm_title}
+                        </h2>
+                        <p className="text-gray-500 text-sm mt-1 ml-14">{t.mm_subtitle}</p>
+                    </div>
                 </div>
                 <button onClick={loadMissions} className="p-2 text-gray-500 hover:text-indigo-600 bg-white border border-gray-200 rounded-full hover:bg-gray-50 transition-colors shadow-sm">
                     <RefreshCw size={18} className={isLoading ? 'animate-spin' : ''} />
@@ -187,7 +228,7 @@ export const MidnightMissionsView: React.FC = () => {
                 <div className="max-w-5xl mx-auto space-y-6">
                     {missions.length === 0 && (
                         <div className="text-center py-20 text-gray-400 italic">
-                            No missions found. Queue one from Dice Storm!
+                            {t.mm_no_missions}
                         </div>
                     )}
 
@@ -204,8 +245,8 @@ export const MidnightMissionsView: React.FC = () => {
                                     </div>
                                     <div className="h-8 w-px bg-gray-200 mx-2"></div>
                                     <div className="flex flex-col text-xs text-gray-500">
-                                        <span>Tasks: {mission.payload.tasks.length}</span>
-                                        <span>Created: {format(mission.createdAt, 'MMM dd, HH:mm')}</span>
+                                        <span>{t.mm_tasks}: {mission.payload.tasks.length}</span>
+                                        <span>{t.mm_created}: {format(mission.createdAt, 'MMM dd, HH:mm')}</span>
                                     </div>
                                 </div>
                                 <div className="flex items-center gap-3">
@@ -214,7 +255,7 @@ export const MidnightMissionsView: React.FC = () => {
                                             onClick={() => handleExecuteMission(mission)}
                                             className="flex items-center gap-1 text-xs font-bold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 px-3 py-1.5 rounded-lg transition-colors border border-indigo-200"
                                         >
-                                            <Play size={12} fill="currentColor"/> Execute Now
+                                            <Play size={12} fill="currentColor"/> {t.mm_execute_now}
                                         </button>
                                     )}
                                     {getStatusBadge(mission.status)}
@@ -251,21 +292,21 @@ export const MidnightMissionsView: React.FC = () => {
                                                 {task.structuredCall ? (
                                                     <div className="text-[10px] text-gray-500 mb-2 space-y-1">
                                                         <div className="truncate" title={task.structuredCall.basePrompt}>
-                                                            <span className="font-semibold text-gray-400">Base:</span> {task.structuredCall.basePrompt}
+                                                            <span className="font-semibold text-gray-400">{t.mm_base}</span> {task.structuredCall.basePrompt}
                                                         </div>
                                                         {task.structuredCall.localPrompt && (
                                                             <div className="truncate" title={task.structuredCall.localPrompt}>
-                                                                <span className="font-semibold text-gray-400">Local:</span> {task.structuredCall.localPrompt}
+                                                                <span className="font-semibold text-gray-400">{t.mm_local}</span> {task.structuredCall.localPrompt}
                                                             </div>
                                                         )}
                                                         {task.structuredCall.globalPrompt && (
                                                             <div className="truncate" title={task.structuredCall.globalPrompt}>
-                                                                <span className="font-semibold text-gray-400">Global:</span> {task.structuredCall.globalPrompt}
+                                                                <span className="font-semibold text-gray-400">{t.mm_global}</span> {task.structuredCall.globalPrompt}
                                                             </div>
                                                         )}
                                                         {task.structuredCall.featuresText && (
                                                             <div className="truncate" title={task.structuredCall.featuresText}>
-                                                                <span className="font-semibold text-gray-400">Features:</span> {task.structuredCall.featuresText.substring(0, 50)}...
+                                                                <span className="font-semibold text-gray-400">{t.mm_features}</span> {task.structuredCall.featuresText.substring(0, 50)}...
                                                             </div>
                                                         )}
                                                     </div>

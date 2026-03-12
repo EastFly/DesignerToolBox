@@ -58,7 +58,7 @@ const getModelsForCategory = (category: OutputCategory): { value: AiModelType, l
         case 'text':
         default:
             return [
-                { value: 'gemini-3.1-pro-preview', label: 'Gemini 3.1 Pro (Complex Text & Vision)' },
+                { value: 'gemini-3-pro-preview', label: 'Gemini 3 Pro (Complex Text & Vision)' },
                 { value: 'gemini-3-flash-preview', label: 'Gemini 3 Flash (Fast Text & Vision)' }
             ];
     }
@@ -208,8 +208,6 @@ const getModelConfig = (model: AiModelType, targetFields: string[], allFields: F
     return config;
 };
 
-import { getApiKey } from '../services/geminiService';
-
 export const PromptBuilderView: React.FC<PromptBuilderViewProps> = ({ language, allFields }) => {
   const t = translations[language];
   
@@ -347,6 +345,35 @@ export const PromptBuilderView: React.FC<PromptBuilderViewProps> = ({ language, 
 
   // --- COPILOT LOGIC ---
 
+  const getApiKey = async () => {
+      let apiKey = '';
+      try {
+          apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY || '';
+      } catch (e) {
+          try {
+              apiKey = process.env.API_KEY || '';
+          } catch (e2) {
+              apiKey = '';
+          }
+      }
+      // @ts-ignore
+      if (!apiKey && typeof window !== 'undefined' && window.aistudio) {
+          // @ts-ignore
+          if (await window.aistudio.hasSelectedApiKey()) {
+              apiKey = process.env.API_KEY || '';
+          } else {
+              try {
+                  // @ts-ignore
+                  await window.aistudio.openSelectKey();
+                  apiKey = process.env.API_KEY || '';
+              } catch (e) {
+                  return null;
+              }
+          }
+      }
+      return apiKey;
+  };
+
   const handleSendMessage = async (e?: React.FormEvent) => {
       e?.preventDefault();
       if (!chatInput.trim()) return;
@@ -363,6 +390,11 @@ export const PromptBuilderView: React.FC<PromptBuilderViewProps> = ({ language, 
 
       try {
           const apiKey = await getApiKey();
+          if (!apiKey) {
+              alert("API Key is required.");
+              setIsCopilotThinking(false);
+              return;
+          }
           const ai = new GoogleGenAI({ apiKey });
           
           // Construct Context about current graph
@@ -384,7 +416,7 @@ export const PromptBuilderView: React.FC<PromptBuilderViewProps> = ({ language, 
           ${fieldsContext}
           
           Available Models: 
-          - 'gemini-3.1-pro-preview' (Best for reasoning, code, complex text)
+          - 'gemini-3-pro-preview' (Best for reasoning, code, complex text)
           - 'gemini-3-flash-preview' (Fast text generation)
           - 'gemini-3-pro-image-preview' (Image generation)
           - 'veo-3.1-generate-preview' (Video generation)
@@ -414,6 +446,8 @@ export const PromptBuilderView: React.FC<PromptBuilderViewProps> = ({ language, 
                   responseMimeType: 'application/json'
               }
           });
+
+          db.logModelUsage('PromptBuilder', 'gemini-3-flash-preview', { type: 'chat', config: { systemInstruction: '...' } }).catch(console.error);
 
           const responseText = response.text || '{}';
           const parsed = JSON.parse(responseText);
@@ -588,7 +622,7 @@ export const PromptBuilderView: React.FC<PromptBuilderViewProps> = ({ language, 
           id: `start-${Date.now()}`,
           type: 'start',
           name: t.pb_start_trigger,
-          model: 'gemini-3.1-pro-preview',
+          model: 'gemini-3-pro-preview',
           inputVariables: [],
           targetFields: [],
           template: '',
@@ -668,7 +702,7 @@ export const PromptBuilderView: React.FC<PromptBuilderViewProps> = ({ language, 
           id: `node-${Date.now()}`,
           type: 'generation',
           name: `${t.pb_action} ${nodes.length}`,
-          model: 'gemini-3.1-pro-preview', 
+          model: 'gemini-3-pro-preview', 
           inputVariables: [],
           targetFields: [],
           template: '',
@@ -780,7 +814,7 @@ export const PromptBuilderView: React.FC<PromptBuilderViewProps> = ({ language, 
 
   const executeGraph = async () => {
       const apiKey = await getApiKey(); 
-      if (!apiKey) { alert("API Key is missing. Please ensure GEMINI_API_KEY is set in your environment."); return; }
+      if (!apiKey) { alert("API_KEY missing"); return; }
       const ai = new GoogleGenAI({ apiKey });
 
       const startNode = nodes.find(n => n.type === 'start');
@@ -946,6 +980,8 @@ export const PromptBuilderView: React.FC<PromptBuilderViewProps> = ({ language, 
                           contents: { parts },
                           config
                       });
+
+                      db.logModelUsage('PromptBuilder', node.model, { type: 'node_execution', config }).catch(console.error);
 
                       if (node.model.includes('image')) {
                           const resParts = response.candidates?.[0]?.content?.parts || [];

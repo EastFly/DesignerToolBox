@@ -1,9 +1,10 @@
 
-import React, { useMemo, useState } from 'react';
-import { X, Clock, BarChart2, User as UserIcon, Calendar, Filter, Download } from 'lucide-react';
+import React, { useMemo, useState, useEffect } from 'react';
+import { X, Clock, BarChart2, User as UserIcon, Calendar, Filter, Download, Database } from 'lucide-react';
 import { Task, StageDef, FullUserProfile, TimeLog } from '../types';
 import { Language, translations } from '../i18n';
 import { differenceInMinutes, format, isWithinInterval, endOfMonth } from 'date-fns';
+import { db } from '../services/db';
 
 interface StatsModalProps {
   isOpen: boolean;
@@ -17,6 +18,13 @@ interface StatsModalProps {
 export const StatsModal: React.FC<StatsModalProps> = ({ isOpen, onClose, tasks, users, stages, language }) => {
   const t = translations[language];
   const [dateRange, setDateRange] = useState<'all' | 'this_month' | 'last_month'>('this_month');
+  const [modelUsage, setModelUsage] = useState<any[]>([]);
+
+  useEffect(() => {
+      if (isOpen) {
+          db.getModelUsageStats().then(data => setModelUsage(data)).catch(console.error);
+      }
+  }, [isOpen]);
   
   // Helpers to replace missing date-fns imports
   const getStartOfMonth = (d: Date) => new Date(d.getFullYear(), d.getMonth(), 1);
@@ -47,7 +55,8 @@ export const StatsModal: React.FC<StatsModalProps> = ({ isOpen, onClose, tasks, 
         assignmentCount: number, 
         totalAssignmentMins: number,
         workSessionCount: number,
-        totalWorkMins: number 
+        totalWorkMins: number,
+        modelUsageCount: number
     }> = {};
 
     tasks.forEach(task => {
@@ -64,7 +73,8 @@ export const StatsModal: React.FC<StatsModalProps> = ({ isOpen, onClose, tasks, 
                     assignmentCount: 0,
                     totalAssignmentMins: 0,
                     workSessionCount: 0,
-                    totalWorkMins: 0
+                    totalWorkMins: 0,
+                    modelUsageCount: 0
                 };
             }
 
@@ -81,8 +91,26 @@ export const StatsModal: React.FC<StatsModalProps> = ({ isOpen, onClose, tasks, 
         });
     });
 
+    modelUsage.forEach(usage => {
+        if (filterInterval && !isWithinInterval(new Date(usage.created_at), filterInterval)) return;
+        
+        if (stats[usage.user_id]) {
+            stats[usage.user_id].modelUsageCount++;
+        } else if (usage.profiles) {
+            stats[usage.user_id] = {
+                userName: usage.profiles.full_name || usage.profiles.email || 'Unknown',
+                role: 'User', // Fallback role
+                assignmentCount: 0,
+                totalAssignmentMins: 0,
+                workSessionCount: 0,
+                totalWorkMins: 0,
+                modelUsageCount: 1
+            };
+        }
+    });
+
     return Object.values(stats);
-  }, [tasks, filterInterval]);
+  }, [tasks, filterInterval, modelUsage]);
 
   const formatDuration = (mins: number) => {
       const h = Math.floor(mins / 60);
@@ -129,7 +157,7 @@ export const StatsModal: React.FC<StatsModalProps> = ({ isOpen, onClose, tasks, 
                                 <span className="text-xs font-medium bg-gray-100 text-gray-500 px-2 py-0.5 rounded uppercase">{stat.role}</span>
                             </div>
                         </div>
-                        <div className="p-6 grid grid-cols-2 gap-6">
+                        <div className="p-6 grid grid-cols-3 gap-4">
                             {/* Work Time Stats */}
                             <div className="space-y-1">
                                 <div className="text-xs font-bold text-green-600 uppercase tracking-wide flex items-center">
@@ -142,10 +170,19 @@ export const StatsModal: React.FC<StatsModalProps> = ({ isOpen, onClose, tasks, 
                             {/* Assignment Time Stats */}
                             <div className="space-y-1">
                                 <div className="text-xs font-bold text-blue-600 uppercase tracking-wide flex items-center">
-                                    <Calendar size={12} className="mr-1.5" /> Assigned Duration
+                                    <Calendar size={12} className="mr-1.5" /> Assigned
                                 </div>
                                 <div className="text-2xl font-bold text-gray-900">{formatDuration(stat.totalAssignmentMins)}</div>
                                 <div className="text-xs text-gray-400">{stat.assignmentCount} assignments</div>
+                            </div>
+
+                            {/* Model Usage Stats */}
+                            <div className="space-y-1">
+                                <div className="text-xs font-bold text-purple-600 uppercase tracking-wide flex items-center">
+                                    <Database size={12} className="mr-1.5" /> AI Usage
+                                </div>
+                                <div className="text-2xl font-bold text-gray-900">{stat.modelUsageCount}</div>
+                                <div className="text-xs text-gray-400">requests</div>
                             </div>
                         </div>
                         <div className="bg-gray-50 px-6 py-3 text-xs text-gray-500 flex justify-between">

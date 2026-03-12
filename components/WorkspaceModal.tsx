@@ -127,8 +127,6 @@ const getModelConfig = (model: AiModelType, targetFields: string[], allFields: F
     return config;
 };
 
-import { getApiKey } from '../services/geminiService';
-
 export const WorkspaceModal: React.FC<WorkspaceModalProps> = ({ 
     task, isOpen, onClose, onMoveStage, onUpdateTask, onDeleteTask, onArchiveTask, currentUser, language, 
     canEdit, // Kept for legacy compatibility if passed
@@ -173,13 +171,11 @@ export const WorkspaceModal: React.FC<WorkspaceModalProps> = ({
   const [newTag, setNewTag] = useState('');
   const [isAddingTag, setIsAddingTag] = useState(false);
   const [showTagSuggestions, setShowTagSuggestions] = useState(false);
-  const [tagMenuPos, setTagMenuPos] = useState<{top: number, left: number} | null>(null);
   const tagInputRef = useRef<HTMLInputElement>(null);
 
   // Property Popover States
   const [assigneeSearch, setAssigneeSearch] = useState('');
   const [isAssigneeOpen, setIsAssigneeOpen] = useState(false);
-  const [assigneeMenuPos, setAssigneeMenuPos] = useState<{top: number, left: number} | null>(null);
   const assigneeButtonRef = useRef<HTMLButtonElement>(null);
 
   // Product Hydration (Check validity on open)
@@ -241,12 +237,10 @@ export const WorkspaceModal: React.FC<WorkspaceModalProps> = ({
       if (isAssigneeOpen || showTagSuggestions) {
           document.addEventListener("mousedown", handleClickOutside);
           window.addEventListener("resize", handleResize);
-          window.addEventListener("scroll", handleResize, true);
       }
       return () => {
           document.removeEventListener("mousedown", handleClickOutside);
           window.removeEventListener("resize", handleResize);
-          window.removeEventListener("scroll", handleResize, true);
       };
   }, [isAssigneeOpen, showTagSuggestions]);
 
@@ -525,12 +519,7 @@ export const WorkspaceModal: React.FC<WorkspaceModalProps> = ({
 
   const toggleAssigneeMenu = () => {
       if (!canEditCore) return; // Assignee is core property
-      if (isAssigneeOpen) setIsAssigneeOpen(false);
-      else if (assigneeButtonRef.current) {
-          const rect = assigneeButtonRef.current.getBoundingClientRect();
-          setAssigneeMenuPos({ top: rect.bottom + 5, left: rect.left });
-          setIsAssigneeOpen(true);
-      }
+      setIsAssigneeOpen(!isAssigneeOpen);
   };
 
   const handleUpdateField = async (fieldKey: string, value: any, parentKey?: string, shouldPersist = false) => {
@@ -645,12 +634,46 @@ export const WorkspaceModal: React.FC<WorkspaceModalProps> = ({
 
   // ... (Automation logic remains same) ...
   // ... (handleRunAutomation logic) ...
+  const getApiKey = async () => {
+      let apiKey = '';
+      try {
+          apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY || '';
+      } catch (e) {
+          try {
+              apiKey = process.env.API_KEY || '';
+          } catch (e2) {
+              apiKey = '';
+          }
+      }
+      // @ts-ignore
+      if (!apiKey && typeof window !== 'undefined' && window.aistudio) {
+          // @ts-ignore
+          if (await window.aistudio.hasSelectedApiKey()) {
+              apiKey = process.env.API_KEY || '';
+          } else {
+              try {
+                  // @ts-ignore
+                  await window.aistudio.openSelectKey();
+                  apiKey = process.env.API_KEY || '';
+              } catch (e) {
+                  return null;
+              }
+          }
+      }
+      return apiKey;
+  };
+
   const handleRunAutomation = async () => {
       if (!activeFlow) return;
       setIsRunningFlow(true);
       setExecutionProgress('Initializing...');
       
       const apiKey = await getApiKey(); 
+      if (!apiKey) {
+          alert("API Key is required.");
+          setIsRunningFlow(false);
+          return;
+      }
       
       // Initialize local step tracker
       const executionSteps: any[] = [];
@@ -957,7 +980,23 @@ export const WorkspaceModal: React.FC<WorkspaceModalProps> = ({
       // -----------------------------------------------------
       // NEW: CHECK FOR CUSTOM LAYOUT
       // -----------------------------------------------------
-      const customLayout = currentTypeConfig.stageLayouts?.[activeStageId];
+      let customLayout = currentTypeConfig.stageLayouts?.[activeStageId];
+
+      // Inheritance: If no layout exists for this stage, inherit from previous stages
+      if (!customLayout || customLayout.length === 0) {
+          const sequence = ['creation', ...(currentTypeConfig.workflow || [])];
+          const currentIndex = sequence.indexOf(activeStageId);
+          if (currentIndex > 0) {
+              for (let i = currentIndex - 1; i >= 0; i--) {
+                  const prevStageId = sequence[i];
+                  const prevLayout = currentTypeConfig.stageLayouts?.[prevStageId];
+                  if (prevLayout && prevLayout.length > 0) {
+                      customLayout = prevLayout;
+                      break;
+                  }
+              }
+          }
+      }
 
       if (customLayout && customLayout.length > 0) {
           // Render using Custom Layout (Grid)
@@ -1149,7 +1188,7 @@ export const WorkspaceModal: React.FC<WorkspaceModalProps> = ({
            </div>
 
            {/* Properties Bar - STRICTLY PRESERVED */}
-           <div className="px-6 py-3 border-t border-gray-100 flex items-center gap-8 overflow-x-auto">
+           <div className="px-6 py-3 border-t border-gray-100 flex items-center gap-8 flex-wrap">
                {/* 1. STATUS SELECTOR */}
                <div className="flex flex-col gap-1 min-w-[140px]">
                    <div className="flex items-center text-xs text-gray-400 font-medium uppercase tracking-wider">
@@ -1179,7 +1218,7 @@ export const WorkspaceModal: React.FC<WorkspaceModalProps> = ({
                </div>
 
                {/* 2. Assignees - RESTRICTED TO CORE */}
-               <div className="flex flex-col gap-1 min-w-[150px]">
+               <div className="flex flex-col gap-1 min-w-[150px] relative">
                    <div className="flex items-center text-xs text-gray-400 font-medium uppercase tracking-wider">
                        <UserIcon size={12} className="mr-1.5"/> {t.assignee}
                    </div>
@@ -1196,11 +1235,10 @@ export const WorkspaceModal: React.FC<WorkspaceModalProps> = ({
                        {canEditCore && <ChevronDown size={12} className="text-gray-400" />}
                    </button>
                    {/* Popover Logic handled in effects */}
-                   {isAssigneeOpen && canEditCore && assigneeMenuPos && (
+                   {isAssigneeOpen && canEditCore && (
                        <div 
                          id="assignee-popover-menu"
-                         style={{ position: 'fixed', top: assigneeMenuPos.top, left: assigneeMenuPos.left, zIndex: 100 }}
-                         className="w-64 bg-white rounded-lg shadow-2xl border border-gray-200 overflow-hidden animate-fade-in-up"
+                         className="absolute top-[100%] left-0 mt-1 w-64 bg-white rounded-lg shadow-2xl border border-gray-200 overflow-hidden animate-fade-in-up z-50"
                        >
                            <div className="p-2 border-b border-gray-100 bg-gray-50">
                                <div className="relative">
@@ -1320,10 +1358,10 @@ export const WorkspaceModal: React.FC<WorkspaceModalProps> = ({
                            isAddingTag ? (
                                <div className="relative">
                                    <form onSubmit={handleAddTag} className="flex items-center">
-                                       <input ref={tagInputRef} autoFocus className="w-24 px-1 py-0.5 text-[10px] border border-indigo-300 rounded outline-none focus:ring-1 focus:ring-indigo-500" value={newTag} onChange={(e) => { setNewTag(e.target.value); setShowTagSuggestions(true); if(e.target) { const rect = e.target.getBoundingClientRect(); setTagMenuPos({ top: rect.bottom + 4, left: rect.left }); } }} onFocus={(e) => { const rect = e.target.getBoundingClientRect(); setTagMenuPos({ top: rect.bottom + 4, left: rect.left }); }} placeholder={language === 'cn' ? '新标签...' : 'New tag...'} onBlur={() => { setTimeout(() => { if(!newTag) setIsAddingTag(false); setShowTagSuggestions(false); }, 150); }} onKeyDown={(e) => { if (e.key === 'Escape') { setIsAddingTag(false); setShowTagSuggestions(false); } }} />
+                                       <input ref={tagInputRef} autoFocus className="w-24 px-1 py-0.5 text-[10px] border border-indigo-300 rounded outline-none focus:ring-1 focus:ring-indigo-500" value={newTag} onChange={(e) => { setNewTag(e.target.value); setShowTagSuggestions(true); }} onFocus={(e) => { setShowTagSuggestions(true); }} placeholder={language === 'cn' ? '新标签...' : 'New tag...'} onBlur={() => { setTimeout(() => { if(!newTag) setIsAddingTag(false); setShowTagSuggestions(false); }, 150); }} onKeyDown={(e) => { if (e.key === 'Escape') { setIsAddingTag(false); setShowTagSuggestions(false); } }} />
                                    </form>
-                                   {showTagSuggestions && tagMenuPos && (
-                                       <div style={{ position: 'fixed', top: tagMenuPos.top, left: tagMenuPos.left, zIndex: 100, width: '12rem' }} className="bg-white border border-gray-200 shadow-xl rounded-md max-h-40 overflow-y-auto animate-fade-in-up">
+                                   {showTagSuggestions && (
+                                       <div className="absolute top-[100%] left-0 mt-1 w-48 bg-white border border-gray-200 shadow-xl rounded-md max-h-40 overflow-y-auto animate-fade-in-up z-50">
                                            {allTags.filter(t => t.toLowerCase().includes(newTag.toLowerCase()) && !(formData.tags || []).includes(t)).map(tag => (
                                                <div key={tag} className="px-3 py-2 hover:bg-indigo-50 cursor-pointer text-xs text-gray-700 truncate border-b border-gray-50" onMouseDown={(e) => { e.preventDefault(); handleAddTag(undefined, tag); }}>{tag}</div>
                                            ))}
