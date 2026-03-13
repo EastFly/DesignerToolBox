@@ -92,6 +92,8 @@ export interface TimelineEvent {
   timestamp: Date;
   duration?: string;
   isAlert?: boolean;
+  type?: 'system' | 'comment';
+  imageUrl?: string;
 }
 
 // --- Time Tracking System (New v2.7) ---
@@ -430,6 +432,7 @@ export interface Task {
   stage: string; // Dynamic Stage ID
   workStatus: WorkStatus; // New: Operational Status
   owner: User;
+  collaborators?: string[]; // Array of user IDs
   deadline: Date;
   startDate?: Date; 
   createdAt: Date;

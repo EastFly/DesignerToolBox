@@ -1,6 +1,6 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Search, Bell, Filter, LayoutGrid, Settings, Globe, Wifi, WifiOff, LogOut, ChevronDown, Check, X, Clock, AlertTriangle, User as UserIcon, CheckCircle, UserCircle, Briefcase, Download, Upload, Trash2, LayoutDashboard, Lock, BarChart2 } from 'lucide-react';
+import { Search, Bell, Filter, LayoutGrid, Settings, Globe, Wifi, WifiOff, LogOut, ChevronDown, Check, X, Clock, AlertTriangle, User as UserIcon, CheckCircle, UserCircle, Briefcase, Download, Upload, Trash2, LayoutDashboard, Lock, BarChart2, RefreshCw } from 'lucide-react';
 import { User, Priority, FullUserProfile } from '../types';
 import { Language, translations } from '../i18n';
 import { ConnectionStatus } from '../services/db';
@@ -29,6 +29,7 @@ interface HeaderProps {
   users: FullUserProfile[];
   canViewAll: boolean; 
   canManageSettings: boolean; // New Prop
+  onRefresh?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -48,6 +49,7 @@ export const Header: React.FC<HeaderProps> = ({
   users,
   canViewAll,
   canManageSettings,
+  onRefresh,
 }) => {
   const t = translations[language];
   const [isFilterOpen, setIsFilterOpen] = useState(false);
@@ -113,6 +115,7 @@ export const Header: React.FC<HeaderProps> = ({
             <button 
                 onClick={() => setIsFilterOpen(!isFilterOpen)}
                 className={`relative p-2 rounded-lg border flex items-center gap-2 transition-all ${isFilterOpen || getActiveFilterCount() > 0 ? 'bg-indigo-50 border-indigo-200 text-indigo-700' : 'bg-white border-gray-200 text-gray-500 hover:bg-gray-50'}`}
+                title="Filter"
             >
                 <Filter size={18} />
                 {getActiveFilterCount() > 0 && (
@@ -121,6 +124,16 @@ export const Header: React.FC<HeaderProps> = ({
                     </span>
                 )}
             </button>
+
+            {onRefresh && (
+                <button 
+                    onClick={onRefresh}
+                    className="p-2 rounded-lg border bg-white border-gray-200 text-gray-500 hover:bg-gray-50 hover:text-indigo-600 transition-all"
+                    title="Refresh Tasks"
+                >
+                    <RefreshCw size={18} />
+                </button>
+            )}
 
             {isFilterOpen && (
                 <div className="absolute top-full right-0 mt-2 w-80 bg-white rounded-xl shadow-2xl border border-gray-100 p-4 z-50 animate-fade-in-up">

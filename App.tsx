@@ -414,6 +414,7 @@ const App: React.FC = () => {
           users={users}
           canViewAll={can('task.view_all')}
           canManageSettings={can('settings.manage') || can('settings.task_types') || can('settings.global_fields') || can('settings.global_stages') || can('settings.roles') || can('settings.users') || can('settings.system') || can('settings.model_usage')}
+          onRefresh={loadData}
         />
 
         <main className="flex-1 overflow-hidden relative">
@@ -528,16 +529,22 @@ const App: React.FC = () => {
              /> 
           )}
 
-          {activeView === 'designer_toolbox' && can('midnight.access') && (
-             <DesignerToolboxView language={language} />
+          {can('midnight.access') && (
+             <div className={activeView === 'designer_toolbox' ? 'h-full' : 'hidden'}>
+                <DesignerToolboxView language={language} />
+             </div>
           )}
 
-          {activeView === 'operator_toolbox' && can('midnight.access') && (
-             <OperatorToolboxView language={language} />
+          {can('midnight.access') && (
+             <div className={activeView === 'operator_toolbox' ? 'h-full' : 'hidden'}>
+                <OperatorToolboxView language={language} />
+             </div>
           )}
 
-          {activeView === 'x_lab' && can('xlab.access') && (
-             <XLabView language={language} />
+          {can('xlab.access') && (
+             <div className={activeView === 'x_lab' ? 'h-full' : 'hidden'}>
+                <XLabView language={language} />
+             </div>
           )}
 
           {activeView === 'archived' && can('dashboard.access') && (

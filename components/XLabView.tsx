@@ -2,6 +2,8 @@ import React, { useState, useRef, useEffect } from 'react';
 import { UploadCloud, Image as ImageIcon, Loader2, Sparkles, Download, RefreshCw, Wand2, Maximize2, MousePointer2, Hand, ZoomIn, ZoomOut, Camera, X } from 'lucide-react';
 import { Language, translations } from '../i18n';
 import { GoogleGenAI } from '@google/genai';
+import { db } from '../services/db';
+import { PackagingDesignView } from './PackagingDesignView';
 
 interface XLabViewProps {
     language: Language;
@@ -40,8 +42,24 @@ export const XLabView: React.FC<XLabViewProps> = ({ language }) => {
     const [refStartPos, setRefStartPos] = useState<{ x: number, y: number } | null>(null);
     const refImageRef = useRef<HTMLImageElement>(null);
 
+    // History Snapshots State
+    interface FocusModeSnapshot {
+        id: string;
+        timestamp: number;
+        image: string | null;
+        selection: { x: number, y: number, width: number, height: number } | null;
+        prompt: string;
+        referenceImage: string | null;
+        model: string;
+    }
+    const [snapshots, setSnapshots] = useState<FocusModeSnapshot[]>([]);
+
     const containerRef = useRef<HTMLDivElement>(null);
     const imageRef = useRef<HTMLImageElement>(null);
+
+    useEffect(() => {
+        // Only load products if needed, but since we moved it to PackagingDesignView, we don't need it here anymore unless Focus Mode needs it.
+    }, []);
 
     // Handle Image Upload
     const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -219,6 +237,17 @@ export const XLabView: React.FC<XLabViewProps> = ({ language }) => {
         
         setIsProcessing(true);
         
+        const currentSnapshot: FocusModeSnapshot = {
+            id: Date.now().toString(),
+            timestamp: Date.now(),
+            image,
+            selection,
+            prompt,
+            referenceImage,
+            model
+        };
+        setSnapshots(prev => [currentSnapshot, ...prev]);
+        
         try {
             const actualCrop = selection ? {
                 x: selection.x,
@@ -289,6 +318,8 @@ export const XLabView: React.FC<XLabViewProps> = ({ language }) => {
                 }
             });
             
+            db.logModelUsage('XLab', model, { type: 'focus_mode', prompt }).catch(console.error);
+            
             // 4. Extract result image
             let resultBase64 = null;
             if (response.candidates && response.candidates[0]?.content?.parts) {
@@ -342,6 +373,31 @@ export const XLabView: React.FC<XLabViewProps> = ({ language }) => {
         document.body.removeChild(a);
     };
 
+    const handleRestoreSnapshot = (snapshot: FocusModeSnapshot) => {
+        // Save current state as a new snapshot so we don't lose it
+        const currentSnapshot: FocusModeSnapshot = {
+            id: Date.now().toString(),
+            timestamp: Date.now(),
+            image,
+            selection,
+            prompt,
+            referenceImage,
+            model
+        };
+        setSnapshots(prev => [currentSnapshot, ...prev.filter(s => s.id !== snapshot.id)]);
+        
+        setImage(snapshot.image);
+        setSelection(snapshot.selection);
+        setPrompt(snapshot.prompt);
+        setReferenceImage(snapshot.referenceImage);
+        setModel(snapshot.model as any);
+    };
+
+    const handleDeleteSnapshot = (id: string, e: React.MouseEvent) => {
+        e.stopPropagation();
+        setSnapshots(prev => prev.filter(s => s.id !== id));
+    };
+
     return (
         <div className="flex flex-col h-full bg-white">
             {/* Header */}
@@ -364,16 +420,20 @@ export const XLabView: React.FC<XLabViewProps> = ({ language }) => {
                     >
                         {t.xlab_focus_mode}
                     </button>
-                    {/* Future experimental features can go here */}
+                    <button 
+                        className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${activeTab === 'packaging_design' ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                        onClick={() => setActiveTab('packaging_design')}
+                    >
+                        {t.xlab_packaging_mode || 'Packaging Design'}
+                    </button>
                 </div>
             </div>
 
             {/* Content */}
             <div className="flex-1 overflow-hidden flex">
-                {activeTab === 'focus_mode' && (
-                    <div className="flex-1 flex flex-col md:flex-row h-full">
-                        {/* Left: Image Area */}
-                        <div className="flex-1 bg-gray-100 p-6 flex flex-col relative overflow-hidden">
+                <div className={activeTab === 'focus_mode' ? "flex-1 flex flex-col md:flex-row h-full w-full" : "hidden"}>
+                    {/* Left: Image Area */}
+                    <div className="flex-1 bg-gray-100 p-6 flex flex-col relative overflow-hidden">
                             {!image ? (
                                 <div className="flex-1 border-2 border-dashed border-gray-300 rounded-xl flex flex-col items-center justify-center bg-white">
                                     <div className="w-16 h-16 bg-indigo-50 text-indigo-500 rounded-full flex items-center justify-center mb-4">
@@ -512,6 +572,55 @@ export const XLabView: React.FC<XLabViewProps> = ({ language }) => {
                                             </div>
                                         )}
                                     </div>
+                                    
+                                    {/* Snapshots History (Filmstrip) */}
+                                    {snapshots.length > 0 && (
+                                        <div className="mt-4 shrink-0 bg-white rounded-xl border border-gray-200 p-3 flex flex-col gap-2 h-32">
+                                            <div className="flex items-center justify-between px-1">
+                                                <h4 className="text-xs font-bold text-gray-700">{t.ot_history_title || 'History'}</h4>
+                                                <button 
+                                                    onClick={() => setSnapshots([])}
+                                                    className="text-[10px] text-red-500 hover:text-red-700 transition-colors"
+                                                >
+                                                    {t.ot_clear_all || 'Clear All'}
+                                                </button>
+                                            </div>
+                                            <div className="flex-1 overflow-x-auto flex gap-3 pb-1 custom-scrollbar">
+                                                {snapshots.map(snap => (
+                                                    <div 
+                                                        key={snap.id}
+                                                        onClick={() => handleRestoreSnapshot(snap)}
+                                                        className="h-full aspect-square bg-gray-50 border border-gray-200 rounded-lg p-1 cursor-pointer hover:border-indigo-400 hover:shadow-sm transition-all group relative shrink-0 flex flex-col"
+                                                    >
+                                                        <div className="flex-1 bg-gray-200 rounded overflow-hidden relative">
+                                                            {snap.image && <img src={snap.image} alt="Snapshot" className="w-full h-full object-cover" />}
+                                                            {snap.selection && (
+                                                                <div 
+                                                                    className="absolute border border-indigo-500 bg-indigo-500/20"
+                                                                    style={{
+                                                                        left: `${(snap.selection.x / imageDims.width) * 100}%`,
+                                                                        top: `${(snap.selection.y / imageDims.height) * 100}%`,
+                                                                        width: `${(snap.selection.width / imageDims.width) * 100}%`,
+                                                                        height: `${(snap.selection.height / imageDims.height) * 100}%`
+                                                                    }}
+                                                                />
+                                                            )}
+                                                        </div>
+                                                        <div className="text-[9px] text-gray-500 mt-1 truncate text-center px-1" title={snap.prompt}>
+                                                            {new Date(snap.timestamp).toLocaleTimeString()}
+                                                        </div>
+                                                        <button 
+                                                            onClick={(e) => handleDeleteSnapshot(snap.id, e)}
+                                                            className="opacity-0 group-hover:opacity-100 p-1 text-white bg-red-500 hover:bg-red-600 transition-opacity absolute -top-1 -right-1 rounded-full shadow-sm"
+                                                            title="Delete snapshot"
+                                                        >
+                                                            <X size={10} />
+                                                        </button>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
                                 </div>
                             )}
                         </div>
@@ -597,7 +706,10 @@ export const XLabView: React.FC<XLabViewProps> = ({ language }) => {
                             </div>
                         </div>
                     </div>
-                )}
+                
+                <div className={activeTab === 'packaging_design' ? "flex-1 h-full" : "hidden"}>
+                    <PackagingDesignView lang={language} />
+                </div>
             </div>
             {/* Reference Crop Modal */}
             {isCroppingReference && tempReferenceImage && (

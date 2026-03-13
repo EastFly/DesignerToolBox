@@ -271,6 +271,77 @@ end;
 $$;
 grant execute on function public.create_profile_if_missing to authenticated;
 
+-- 6. Model Stats RPC
+create or replace function public.get_model_usage_stats(days int default 30)
+returns json as $$
+declare
+  result json;
+  cutoff timestamptz;
+begin
+  if days = 0 then
+    cutoff := '1970-01-01'::timestamptz;
+  else
+    cutoff := now() - (days || ' days')::interval;
+  end if;
+
+  select json_build_object(
+    'total_requests', (select count(*) from public.model_usage where created_at >= cutoff),
+    'trend', (
+      select coalesce(json_agg(t), '[]'::json) from (
+        select to_char(created_at, 'Mon DD') as date, count(*) as count
+        from public.model_usage
+        where created_at >= cutoff
+        group by to_char(created_at, 'Mon DD'), date_trunc('day', created_at)
+        order by date_trunc('day', created_at)
+      ) t
+    ),
+    'modules', (
+      select coalesce(json_agg(m), '[]'::json) from (
+        select module as name, count(*) as value
+        from public.model_usage
+        where created_at >= cutoff
+        group by module
+        order by value desc
+      ) m
+    ),
+    'users', (
+      select coalesce(json_agg(u), '[]'::json) from (
+        select 
+          mu.user_id,
+          coalesce(p.full_name, p.email, 'Unknown User') as name,
+          sum(mu.module_count) as total_count,
+          json_object_agg(coalesce(mu.module, 'Unknown'), mu.module_count) as modules
+        from (
+          select user_id, module, count(*) as module_count
+          from public.model_usage
+          where created_at >= cutoff
+          group by user_id, module
+        ) mu
+        left join public.profiles p on p.id = mu.user_id
+        group by mu.user_id, p.full_name, p.email
+        order by total_count desc
+      ) u
+    ),
+    'recent', (
+      select coalesce(json_agg(r), '[]'::json) from (
+        select 
+          mu.created_at,
+          mu.module,
+          mu.model_name,
+          coalesce(p.full_name, p.email, 'Unknown User') as user_name
+        from public.model_usage mu
+        left join public.profiles p on p.id = mu.user_id
+        where mu.created_at >= cutoff
+        order by mu.created_at desc
+        limit 20
+      ) r
+    )
+  ) into result;
+  return result;
+end;
+$$ language plpgsql security definer;
+grant execute on function public.get_model_usage_stats to authenticated;
+
 -- Force Schema Cache Reload (notify PostgREST)
 NOTIFY pgrst, 'reload config';
 `;

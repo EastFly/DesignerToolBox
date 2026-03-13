@@ -16,82 +16,28 @@ const COLORS = ['#4f46e5', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4'
 
 export const ModelStatsView: React.FC<ModelStatsViewProps> = ({ language }) => {
   const t = translations[language];
-  const [usageData, setUsageData] = useState<any[]>([]);
+  const [stats, setStats] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [timeRange, setTimeRange] = useState<'7d' | '30d' | 'all'>('7d');
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchStats = async () => {
       setIsLoading(true);
+      setError(null);
       try {
-        const data = await db.getModelUsageStats();
-        setUsageData(data);
-      } catch (error) {
+        const days = timeRange === '7d' ? 7 : timeRange === '30d' ? 30 : 0;
+        const data = await db.getModelUsageStats(days);
+        setStats(data);
+      } catch (error: any) {
         console.error('Failed to fetch model stats:', error);
+        setError(error.message || 'Failed to load stats. Please ensure the database is updated.');
       } finally {
         setIsLoading(false);
       }
     };
     fetchStats();
-  }, []);
-
-  const filteredData = useMemo(() => {
-    if (timeRange === 'all') return usageData;
-    const days = timeRange === '7d' ? 7 : 30;
-    const cutoff = subDays(new Date(), days);
-    return usageData.filter(item => new Date(item.created_at) >= cutoff);
-  }, [usageData, timeRange]);
-
-  // 1. Trend Data (Requests per day)
-  const trendData = useMemo(() => {
-    const days = timeRange === '7d' ? 7 : timeRange === '30d' ? 30 : 30; // Default to 30 for 'all' to avoid huge charts
-    const data: Record<string, number> = {};
-    
-    // Initialize dates
-    for (let i = days - 1; i >= 0; i--) {
-      const date = subDays(new Date(), i);
-      data[format(date, 'MMM dd')] = 0;
-    }
-
-    filteredData.forEach(item => {
-      const dateStr = format(new Date(item.created_at), 'MMM dd');
-      if (data[dateStr] !== undefined) {
-        data[dateStr]++;
-      } else if (timeRange === 'all') {
-         data[dateStr] = (data[dateStr] || 0) + 1;
-      }
-    });
-
-    return Object.entries(data).map(([date, count]) => ({ date, count }));
-  }, [filteredData, timeRange]);
-
-  // 2. Module Usage (Pie Chart)
-  const moduleData = useMemo(() => {
-    const counts: Record<string, number> = {};
-    filteredData.forEach(item => {
-      const mod = item.module || 'Unknown';
-      counts[mod] = (counts[mod] || 0) + 1;
-    });
-    return Object.entries(counts)
-      .map(([name, value]) => ({ name, value }))
-      .sort((a, b) => b.value - a.value);
-  }, [filteredData]);
-
-  // 3. User Usage (Bar Chart)
-  const userUsageData = useMemo(() => {
-    const counts: Record<string, { name: string, count: number }> = {};
-    filteredData.forEach(item => {
-      const userId = item.user_id;
-      const userName = item.profiles?.full_name || item.profiles?.email || 'Unknown User';
-      if (!counts[userId]) {
-        counts[userId] = { name: userName, count: 0 };
-      }
-      counts[userId].count++;
-    });
-    return Object.values(counts)
-      .sort((a, b) => b.count - a.count)
-      .slice(0, 10); // Top 10 users
-  }, [filteredData]);
+  }, [timeRange]);
 
   if (isLoading) {
     return (
@@ -100,6 +46,23 @@ export const ModelStatsView: React.FC<ModelStatsViewProps> = ({ language }) => {
       </div>
     );
   }
+
+  if (error || !stats) {
+    return (
+      <div className="flex-1 flex flex-col items-center justify-center bg-gray-50 h-full p-8 text-center">
+        <Database className="text-red-400 mb-4" size={48} />
+        <h2 className="text-xl font-bold text-gray-800 mb-2">Database Update Required</h2>
+        <p className="text-gray-600 max-w-md">
+          {error}
+        </p>
+        <p className="text-sm text-gray-500 mt-4">
+          Please go to Settings &gt; Database Setup and run the latest SQL script to create the required RPC functions.
+        </p>
+      </div>
+    );
+  }
+
+  const { total_requests, trend, modules, users, recent } = stats;
 
   return (
     <div className="flex flex-col h-full bg-gray-50 overflow-hidden">
@@ -147,7 +110,7 @@ export const ModelStatsView: React.FC<ModelStatsViewProps> = ({ language }) => {
               </div>
               <div>
                 <p className="text-sm text-gray-500 font-medium">{t.ms_total_requests}</p>
-                <p className="text-3xl font-bold text-gray-900">{filteredData.length}</p>
+                <p className="text-3xl font-bold text-gray-900">{total_requests}</p>
               </div>
             </div>
             <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm flex items-center gap-4">
@@ -156,7 +119,7 @@ export const ModelStatsView: React.FC<ModelStatsViewProps> = ({ language }) => {
               </div>
               <div>
                 <p className="text-sm text-gray-500 font-medium">{t.ms_active_modules}</p>
-                <p className="text-3xl font-bold text-gray-900">{moduleData.length}</p>
+                <p className="text-3xl font-bold text-gray-900">{modules.length}</p>
               </div>
             </div>
             <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm flex items-center gap-4">
@@ -165,7 +128,7 @@ export const ModelStatsView: React.FC<ModelStatsViewProps> = ({ language }) => {
               </div>
               <div>
                 <p className="text-sm text-gray-500 font-medium">{t.ms_active_users}</p>
-                <p className="text-3xl font-bold text-gray-900">{userUsageData.length}</p>
+                <p className="text-3xl font-bold text-gray-900">{users.length}</p>
               </div>
             </div>
           </div>
@@ -180,7 +143,7 @@ export const ModelStatsView: React.FC<ModelStatsViewProps> = ({ language }) => {
               </h3>
               <div className="h-[300px] w-full">
                 <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={trendData}>
+                  <LineChart data={trend}>
                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f3f4f6" />
                     <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{fill: '#6b7280', fontSize: 12}} dy={10} />
                     <YAxis axisLine={false} tickLine={false} tick={{fill: '#6b7280', fontSize: 12}} dx={-10} />
@@ -201,11 +164,11 @@ export const ModelStatsView: React.FC<ModelStatsViewProps> = ({ language }) => {
                 {t.ms_usage_by_module}
               </h3>
               <div className="h-[300px] w-full flex items-center justify-center">
-                {moduleData.length > 0 ? (
+                {modules.length > 0 ? (
                   <ResponsiveContainer width="100%" height="100%">
                     <PieChart>
                       <Pie
-                        data={moduleData}
+                        data={modules}
                         cx="50%"
                         cy="50%"
                         innerRadius={60}
@@ -213,7 +176,7 @@ export const ModelStatsView: React.FC<ModelStatsViewProps> = ({ language }) => {
                         paddingAngle={5}
                         dataKey="value"
                       >
-                        {moduleData.map((entry, index) => (
+                        {modules.map((entry: any, index: number) => (
                           <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                         ))}
                       </Pie>
@@ -230,32 +193,52 @@ export const ModelStatsView: React.FC<ModelStatsViewProps> = ({ language }) => {
             </div>
           </div>
 
-          {/* Charts Row 2 */}
-          <div className="grid grid-cols-1 gap-6">
-            {/* User Bar Chart */}
-            <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
-              <h3 className="text-lg font-bold text-gray-800 mb-6 flex items-center">
-                <Users className="mr-2 text-green-500" size={20}/>
-                {t.ms_top_users}
-              </h3>
-              <div className="h-[300px] w-full">
-                {userUsageData.length > 0 ? (
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={userUsageData} layout="vertical" margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
-                      <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} stroke="#f3f4f6" />
-                      <XAxis type="number" axisLine={false} tickLine={false} tick={{fill: '#6b7280', fontSize: 12}} />
-                      <YAxis dataKey="name" type="category" axisLine={false} tickLine={false} tick={{fill: '#374151', fontSize: 12, fontWeight: 500}} width={150} />
-                      <RechartsTooltip 
-                        cursor={{fill: '#f3f4f6'}}
-                        contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)' }}
-                      />
-                      <Bar dataKey="count" fill="#10b981" radius={[0, 4, 4, 0]} barSize={24} name={t.ms_requests} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                ) : (
-                  <div className="flex items-center justify-center h-full text-gray-400 text-sm italic">{t.ms_no_data}</div>
-                )}
-              </div>
+          {/* User Usage List */}
+          <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
+            <h3 className="text-lg font-bold text-gray-800 mb-6 flex items-center gap-2">
+              <Users size={20} className="text-green-500" />
+              {language === 'cn' ? '用户使用统计' : 'User Usage Statistics'}
+            </h3>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="border-b border-gray-200 bg-gray-50">
+                    <th className="py-3 px-4 text-sm font-semibold text-gray-600 rounded-tl-lg">{language === 'cn' ? '用户' : 'User'}</th>
+                    <th className="py-3 px-4 text-sm font-semibold text-gray-600">{language === 'cn' ? '总请求数' : 'Total Requests'}</th>
+                    <th className="py-3 px-4 text-sm font-semibold text-gray-600 rounded-tr-lg">{language === 'cn' ? '模块使用明细' : 'Module Breakdown'}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {users.map((user: any) => (
+                    <tr key={user.user_id} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
+                      <td className="py-3 px-4">
+                        <div className="font-medium text-gray-900">{user.name}</div>
+                      </td>
+                      <td className="py-3 px-4">
+                        <div className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold bg-purple-100 text-purple-800">
+                          {user.total_count}
+                        </div>
+                      </td>
+                      <td className="py-3 px-4">
+                        <div className="flex flex-wrap gap-2">
+                          {Object.entries(user.modules).map(([mod, count]: [string, any]) => (
+                            <span key={mod} className="inline-flex items-center px-2 py-1 rounded text-xs font-medium bg-white text-gray-700 border border-gray-200 shadow-sm">
+                              {mod}: <span className="ml-1 font-bold text-indigo-600">{count}</span>
+                            </span>
+                          ))}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                  {users.length === 0 && (
+                    <tr>
+                      <td colSpan={3} className="py-8 text-center text-gray-500 italic">
+                        {t.ms_no_data}
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
             </div>
           </div>
 
@@ -273,13 +256,13 @@ export const ModelStatsView: React.FC<ModelStatsViewProps> = ({ language }) => {
                   </tr>
                 </thead>
                 <tbody className="text-sm">
-                  {filteredData.slice(0, 20).map((item, idx) => (
+                  {recent.map((item: any, idx: number) => (
                     <tr key={idx} className="border-b border-gray-100 last:border-0 hover:bg-gray-50 transition-colors">
                       <td className="py-3 text-gray-500 whitespace-nowrap">
                         {format(new Date(item.created_at), 'MMM dd, HH:mm:ss')}
                       </td>
                       <td className="py-3 font-medium text-gray-900">
-                        {item.profiles?.full_name || item.profiles?.email || 'Unknown'}
+                        {item.user_name}
                       </td>
                       <td className="py-3">
                         <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-50 text-blue-700 border border-blue-100">
@@ -291,7 +274,7 @@ export const ModelStatsView: React.FC<ModelStatsViewProps> = ({ language }) => {
                       </td>
                     </tr>
                   ))}
-                  {filteredData.length === 0 && (
+                  {recent.length === 0 && (
                     <tr>
                       <td colSpan={4} className="py-8 text-center text-gray-400 italic">{t.ms_no_recent}</td>
                     </tr>

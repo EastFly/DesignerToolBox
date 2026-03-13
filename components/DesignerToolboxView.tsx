@@ -20,6 +20,8 @@ interface UploadedImage {
     resultUrl?: string;
     errorMsg?: string;
     debugPayload?: any;
+    originalName: string;
+    processedMode?: string;
 }
 
 interface RemixAsset {
@@ -28,6 +30,7 @@ interface RemixAsset {
     preview: string;
     role: 'product' | 'scenario' | 'layout' | 'inline';
     label: string;
+    originalName: string;
 }
 
 const MODELS = [
@@ -144,7 +147,8 @@ export const DesignerToolboxView: React.FC<DesignerToolboxViewProps> = ({ langua
                 id: Math.random().toString(36).substring(7),
                 file,
                 preview: URL.createObjectURL(file),
-                status: 'pending' as const
+                status: 'pending' as const,
+                originalName: file.name
             }));
             setImages(prev => [...prev, ...newImages]);
         }
@@ -161,7 +165,8 @@ export const DesignerToolboxView: React.FC<DesignerToolboxViewProps> = ({ langua
                     file,
                     preview: URL.createObjectURL(file),
                     role,
-                    label: `[${role} ${existingRoleCount + index + 1}]`
+                    label: `[${role} ${existingRoleCount + index + 1}]`,
+                    originalName: file.name
                 };
             });
             
@@ -190,7 +195,8 @@ export const DesignerToolboxView: React.FC<DesignerToolboxViewProps> = ({ langua
                     file,
                     preview: URL.createObjectURL(file),
                     role: 'inline' as const,
-                    label: `[inline ${existingRoleCount + index + 1}]`
+                    label: `[inline ${existingRoleCount + index + 1}]`,
+                    originalName: file.name
                 };
             });
             
@@ -316,11 +322,14 @@ export const DesignerToolboxView: React.FC<DesignerToolboxViewProps> = ({ langua
             if (targetImageId) {
                 setImages(prev => prev.map(p => p.id === targetImageId ? { ...p, status: 'processing' } : p));
             } else {
+                const primaryAsset = remixAssets.find(a => a.role === 'scenario') || remixAssets.find(a => a.role === 'layout') || remixAssets[0];
+                const originalName = primaryAsset ? primaryAsset.originalName : 'remix.jpg';
                 setImages(prev => [{
                     id: newImageId,
-                    file: new File([], 'remix.jpg'),
+                    file: new File([], originalName),
                     preview: previewUrl,
-                    status: 'processing'
+                    status: 'processing',
+                    originalName: originalName
                 }, ...prev]);
             }
 
@@ -599,7 +608,7 @@ ${customPrompt ? `Additional instructions: ${customPrompt}` : ''}`;
                 }
 
                 if (resultUrl) {
-                    setImages(prev => prev.map(p => p.id === img.id ? { ...p, status: 'success', resultUrl, debugPayload } : p));
+                    setImages(prev => prev.map(p => p.id === img.id ? { ...p, status: 'success', resultUrl, debugPayload, processedMode: mode } : p));
                     
                     // Save to history
                     const historyItem: HistoryItem = {
@@ -630,12 +639,46 @@ ${customPrompt ? `Additional instructions: ${customPrompt}` : ''}`;
 
         const zip = new JSZip();
         
+        const filenameCounts: Record<string, Record<string, number>> = {};
+        const uniqueModes = new Set(successfulImages.map(i => i.processedMode || 'unknown'));
+        const useFolders = uniqueModes.size > 1;
+        
         for (let index = 0; index < successfulImages.length; index++) {
             const img = successfulImages[index];
             try {
                 const response = await fetch(img.resultUrl!);
                 const blob = await response.blob();
-                zip.file(`processed_${mode}_${index + 1}.jpeg`, blob);
+                
+                const modeFolder = img.processedMode || 'unknown';
+                if (!filenameCounts[modeFolder]) {
+                    filenameCounts[modeFolder] = {};
+                }
+                
+                let baseName = img.originalName || `processed_${index + 1}.jpeg`;
+                const lastDotIndex = baseName.lastIndexOf('.');
+                let nameWithoutExt = baseName;
+                let ext = '';
+                if (lastDotIndex !== -1) {
+                    nameWithoutExt = baseName.substring(0, lastDotIndex);
+                    ext = baseName.substring(lastDotIndex);
+                } else {
+                    ext = '.jpeg';
+                }
+                
+                let finalName = baseName;
+                if (filenameCounts[modeFolder][baseName]) {
+                    const count = filenameCounts[modeFolder][baseName];
+                    finalName = `${nameWithoutExt}${count}${ext}`;
+                    filenameCounts[modeFolder][baseName]++;
+                } else {
+                    filenameCounts[modeFolder][baseName] = 1;
+                }
+                
+                if (useFolders) {
+                    zip.folder(modeFolder)?.file(finalName, blob);
+                } else {
+                    zip.file(finalName, blob);
+                }
             } catch (error) {
                 console.error("Failed to add image to zip", error);
             }
@@ -645,7 +688,7 @@ ${customPrompt ? `Additional instructions: ${customPrompt}` : ''}`;
             const content = await zip.generateAsync({ type: 'blob' });
             const a = document.createElement('a');
             a.href = URL.createObjectURL(content);
-            a.download = `designer_toolbox_${mode}_${Date.now()}.zip`;
+            a.download = `designer_toolbox_${Date.now()}.zip`;
             document.body.appendChild(a);
             a.click();
             document.body.removeChild(a);
@@ -1258,7 +1301,17 @@ ${customPrompt ? `Additional instructions: ${customPrompt}` : ''}`;
                                                         onClick={() => {
                                                             const a = document.createElement('a');
                                                             a.href = img.resultUrl!;
-                                                            a.download = `processed_${img.id}.jpeg`;
+                                                            
+                                                            let downloadName = `processed_${img.id}.jpeg`;
+                                                            if (img.originalName) {
+                                                                const lastDotIndex = img.originalName.lastIndexOf('.');
+                                                                if (lastDotIndex !== -1) {
+                                                                    downloadName = `${img.originalName.substring(0, lastDotIndex)}_${img.processedMode || 'processed'}${img.originalName.substring(lastDotIndex)}`;
+                                                                } else {
+                                                                    downloadName = `${img.originalName}_${img.processedMode || 'processed'}.jpeg`;
+                                                                }
+                                                            }
+                                                            a.download = downloadName;
                                                             a.click();
                                                         }}
                                                         className="absolute bottom-2 right-2 bg-white/90 hover:bg-white text-gray-700 p-1.5 rounded-lg shadow-sm transition-colors"

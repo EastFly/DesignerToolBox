@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { X, Clock, ArrowRight, Upload, Image as ImageIcon, Download, Calendar, Tag, ShieldAlert, Link as LinkIcon, Box, Edit2, Save, Trash2, Plus, Loader2, Send, CheckCircle, AlertCircle, UploadCloud, Minus, Lock, User as UserIcon, Play, Pause, ChevronRight, ChevronDown, Flag, Target, Search, RefreshCcw, AlertTriangle, FolderOpen, Film, Video, ArrowLeft, RotateCcw, Sparkles, Info, GripVertical, FileInput, Wand2, Code, FileJson, Bug, Eye, Package, Archive, FileText, Star, ZoomIn } from 'lucide-react';
+import { X, Clock, ArrowRight, Upload, Image as ImageIcon, Download, Calendar, Tag, ShieldAlert, Link as LinkIcon, Box, Edit2, Save, Trash2, Plus, Loader2, Send, CheckCircle, AlertCircle, UploadCloud, Minus, Lock, User as UserIcon, Play, Pause, ChevronRight, ChevronDown, Flag, Target, Search, RefreshCcw, AlertTriangle, FolderOpen, Film, Video, ArrowLeft, RotateCcw, Sparkles, Info, GripVertical, FileInput, Wand2, Code, FileJson, Bug, Eye, Package, Archive, FileText, Star, ZoomIn, MessageSquare } from 'lucide-react';
 import { Task, Stage, User, SellingPoint, StageDef, TaskTypeConfig, FieldDefinition, Priority, FullUserProfile, WorkStatus, TimeLog, PromptFlow, PromptNode, AiModelType, Product, ProductChangeLog, AssetMetadata, TimelineEvent, TaskDifficulty, ProductLevel, TaskShareLink } from '../types';
 import { format, differenceInMinutes, endOfDay } from 'date-fns';
 import { Language, translations } from '../i18n';
@@ -165,6 +165,11 @@ export const WorkspaceModal: React.FC<WorkspaceModalProps> = ({
   
   // Comment State
   const [commentText, setCommentText] = useState('');
+  const [activeRightTab, setActiveRightTab] = useState<'comments' | 'activity'>('comments');
+  const [commentImage, setCommentImage] = useState<string | null>(null);
+  const [isUploadingCommentImage, setIsUploadingCommentImage] = useState(false);
+  const [isSubmittingComment, setIsSubmittingComment] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
   
   // Tags State
@@ -177,6 +182,15 @@ export const WorkspaceModal: React.FC<WorkspaceModalProps> = ({
   const [assigneeSearch, setAssigneeSearch] = useState('');
   const [isAssigneeOpen, setIsAssigneeOpen] = useState(false);
   const assigneeButtonRef = useRef<HTMLButtonElement>(null);
+
+  const [collaboratorSearch, setCollaboratorSearch] = useState('');
+  const [isCollaboratorsOpen, setIsCollaboratorsOpen] = useState(false);
+  const collaboratorsButtonRef = useRef<HTMLButtonElement>(null);
+  
+  const [draftCollaborators, setDraftCollaborators] = useState<string[] | null>(null);
+  const draftRef = useRef<string[] | null>(null);
+  const latestUpdateProperty = useRef<((updates: Partial<Task>) => Promise<void>) | null>(null);
+  const latestCollaborators = useRef(formData.collaborators || []);
 
   // Product Hydration (Check validity on open)
   const [linkedProduct, setLinkedProduct] = useState<Product | null>(null);
@@ -198,6 +212,17 @@ export const WorkspaceModal: React.FC<WorkspaceModalProps> = ({
     }
   }, [task]);
 
+  // Fetch the latest task data when modal opens
+  useEffect(() => {
+      if (isOpen && task.id) {
+          db.getTask(task.id).then(latestTask => {
+              if (latestTask) {
+                  onUpdateTask(latestTask);
+              }
+          });
+      }
+  }, [isOpen, task.id]);
+
   // 2. Reset View/Debug State ONLY when Task ID changes or Modal Opens
   useEffect(() => {
     setActiveStageId(task.stage); 
@@ -218,23 +243,34 @@ export const WorkspaceModal: React.FC<WorkspaceModalProps> = ({
   // ... (Click Outside Handler & scrollIntoView - No Changes) ...
   useEffect(() => {
       const handleClickOutside = (event: MouseEvent) => {
-          const menuEl = document.getElementById('assignee-popover-menu');
+          const assigneeMenuEl = document.getElementById('assignee-popover-menu');
           if (
               assigneeButtonRef.current && 
               !assigneeButtonRef.current.contains(event.target as Node) &&
-              menuEl && 
-              !menuEl.contains(event.target as Node)
+              assigneeMenuEl && 
+              !assigneeMenuEl.contains(event.target as Node)
           ) {
               setIsAssigneeOpen(false);
+          }
+
+          const collaboratorsMenuEl = document.getElementById('collaborators-popover-menu');
+          if (
+              collaboratorsButtonRef.current && 
+              !collaboratorsButtonRef.current.contains(event.target as Node) &&
+              collaboratorsMenuEl && 
+              !collaboratorsMenuEl.contains(event.target as Node)
+          ) {
+              setIsCollaboratorsOpen(false);
           }
       };
       
       const handleResize = () => {
           setIsAssigneeOpen(false);
+          setIsCollaboratorsOpen(false);
           setShowTagSuggestions(false);
       };
 
-      if (isAssigneeOpen || showTagSuggestions) {
+      if (isAssigneeOpen || isCollaboratorsOpen || showTagSuggestions) {
           document.addEventListener("mousedown", handleClickOutside);
           window.addEventListener("resize", handleResize);
       }
@@ -242,13 +278,13 @@ export const WorkspaceModal: React.FC<WorkspaceModalProps> = ({
           document.removeEventListener("mousedown", handleClickOutside);
           window.removeEventListener("resize", handleResize);
       };
-  }, [isAssigneeOpen, showTagSuggestions]);
+  }, [isAssigneeOpen, isCollaboratorsOpen, showTagSuggestions]);
 
   useEffect(() => {
       if(chatEndRef.current) {
           chatEndRef.current.scrollIntoView({ behavior: 'smooth' });
       }
-  }, [task.timeline]);
+  }, [formData.timeline]);
 
   if (!isOpen) return null;
 
@@ -265,7 +301,7 @@ export const WorkspaceModal: React.FC<WorkspaceModalProps> = ({
       .map(id => allStages.find(s => s.id === id))
       .filter(s => !!s) as StageDef[];
 
-  const currentTaskStageIndex = activeWorkflowIds.indexOf(task.stage);
+  const currentTaskStageIndex = activeWorkflowIds.indexOf(formData.stage);
   const activeTabIndex = activeWorkflowIds.indexOf(activeStageId);
   const effectiveTaskStageIndex = currentTaskStageIndex === -1 ? 0 : currentTaskStageIndex;
   
@@ -352,7 +388,7 @@ export const WorkspaceModal: React.FC<WorkspaceModalProps> = ({
 
   const currentStageValidation = useMemo(() => {
       if (!currentTypeConfig) return true;
-      const stageConfig = currentTypeConfig.fieldMatrix[task.stage];
+      const stageConfig = currentTypeConfig.fieldMatrix[formData.stage];
       if (!stageConfig) return true; 
 
       for (const fieldKey of Object.keys(stageConfig)) {
@@ -364,7 +400,7 @@ export const WorkspaceModal: React.FC<WorkspaceModalProps> = ({
           }
       }
       return true;
-  }, [formData, task.stage, currentTypeConfig]);
+  }, [formData, formData.stage, currentTypeConfig]);
 
   const activeStageFields = useMemo(() => {
       if (!currentTypeConfig) return [];
@@ -445,6 +481,12 @@ export const WorkspaceModal: React.FC<WorkspaceModalProps> = ({
               updates.workStatus;
           newEvents.push({ id: `e-${Date.now()}-1`, actor: currentUser, action: `Status changed to: ${label}`, timestamp: now });
       }
+
+      if (updates.stage && updates.stage !== formData.stage) {
+          const stageTitle = activeWorkflowStages.find(s => s.id === updates.stage)?.title || updates.stage;
+          const actionText = language === 'cn' ? `移动到阶段: ${stageTitle}` : `Moved to stage: ${stageTitle}`;
+          newEvents.push({ id: `e-${Date.now()}-2`, actor: currentUser, action: actionText, timestamp: now });
+      }
       
       // ... (Rest of updateProperty logic) ...
       const logs = [...(formData.timeLogs || [])];
@@ -452,8 +494,8 @@ export const WorkspaceModal: React.FC<WorkspaceModalProps> = ({
       const updatedTask = { 
           ...formData, 
           ...updates, 
-          timeLogs: logs,
-          timeline: [...formData.timeline, ...newEvents]
+          timeLogs: updates.timeLogs || logs,
+          timeline: updates.timeline ? [...updates.timeline, ...newEvents] : [...formData.timeline, ...newEvents]
       };
       
       setFormData(updatedTask);
@@ -462,26 +504,46 @@ export const WorkspaceModal: React.FC<WorkspaceModalProps> = ({
       // --- SYNC LOGIC UPDATE: ONLY ON COMPLETION OR LAST STAGE ---
       const isCompletedStatus = updates.workStatus === 'completed';
       // Check if we are moving to the last stage (Archived/Done)
-      const resultingStageIndex = activeWorkflowStages.findIndex(s => s.id === (updates.stage || task.stage));
+      const resultingStageIndex = activeWorkflowStages.findIndex(s => s.id === (updates.stage || formData.stage));
       const isResultingLastStage = resultingStageIndex === activeWorkflowStages.length - 1;
 
       if (isCompletedStatus || isResultingLastStage) {
           await syncToProduct(updatedTask); 
       }
 
-      if (updates.stage && updates.stage !== task.stage) {
-          onMoveStage(task.id, updates.stage); 
-      } else {
-          onUpdateTask(updatedTask);
-      }
+      onUpdateTask(updatedTask);
   };
+
+  useEffect(() => {
+      latestUpdateProperty.current = updateProperty;
+      latestCollaborators.current = formData.collaborators || [];
+  });
+
+  useEffect(() => {
+      if (isCollaboratorsOpen) {
+          const initial = latestCollaborators.current;
+          setDraftCollaborators(initial);
+          draftRef.current = initial;
+      } else {
+          if (draftRef.current !== null) {
+              const current = latestCollaborators.current;
+              const draft = draftRef.current;
+              const isChanged = draft.length !== current.length || !draft.every(id => current.includes(id)) || !current.every(id => draft.includes(id));
+              if (isChanged && latestUpdateProperty.current) {
+                  latestUpdateProperty.current({ collaborators: draft });
+              }
+              setDraftCollaborators(null);
+              draftRef.current = null;
+          }
+      }
+  }, [isCollaboratorsOpen]);
 
   // ... (Other handlers like Status, Type, Field update - No Changes) ...
   const handleStatusChange = (newStatus: WorkStatus) => {
       if (!canEditContent) return; // Status controlled by content editor usually
       if (newStatus === 'in_progress') {
-          const currentCount = getActiveTaskCount(task.owner.id);
-          if (task.workStatus !== 'in_progress' && currentCount >= 3) {
+          const currentCount = getActiveTaskCount(formData.owner.id);
+          if (formData.workStatus !== 'in_progress' && currentCount >= 3) {
               alert(t.error_too_many_tasks);
               return;
           }
@@ -520,6 +582,13 @@ export const WorkspaceModal: React.FC<WorkspaceModalProps> = ({
   const toggleAssigneeMenu = () => {
       if (!canEditCore) return; // Assignee is core property
       setIsAssigneeOpen(!isAssigneeOpen);
+      if (!isAssigneeOpen) setIsCollaboratorsOpen(false);
+  };
+
+  const toggleCollaboratorsMenu = () => {
+      if (!canEditCore) return; // Collaborators is core property
+      setIsCollaboratorsOpen(!isCollaboratorsOpen);
+      if (!isCollaboratorsOpen) setIsAssigneeOpen(false);
   };
 
   const handleUpdateField = async (fieldKey: string, value: any, parentKey?: string, shouldPersist = false) => {
@@ -765,15 +834,82 @@ export const WorkspaceModal: React.FC<WorkspaceModalProps> = ({
       const href = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = href;
-      link.download = `${task.identity.sku || 'task'}_export.json`;
+      link.download = `${formData.identity.sku || 'task'}_export.json`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
   };
 
-  const handleAddComment = async (e?: React.FormEvent) => { /* ... */ };
-  const handleAddTag = (e?: React.FormEvent, tagValue?: string) => { /* ... */ };
-  const handleRemoveTag = (tagToRemove: string) => { /* ... */ };
+  const handleAddComment = async (e?: React.FormEvent) => {
+      if (e) e.preventDefault();
+      if (!commentText.trim() && !commentImage) return;
+      if (isSubmittingComment) return;
+      
+      setIsSubmittingComment(true);
+      try {
+          const newTimelineEvent: TimelineEvent = {
+              id: Date.now().toString(),
+              action: commentText.trim() ? commentText : (t.commented || 'Commented'),
+              timestamp: new Date(),
+              actor: currentUser,
+              type: 'comment',
+              imageUrl: commentImage || undefined
+          };
+          
+          const updatedTask = {
+              ...formData,
+              timeline: [...formData.timeline, newTimelineEvent]
+          };
+          
+          await db.updateTask(updatedTask);
+          
+          setFormData(updatedTask);
+          onUpdateTask(updatedTask);
+
+          setCommentText('');
+          setCommentImage(null);
+          setTimeout(() => {
+              chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+          }, 100);
+      } catch (error) {
+          console.error("Failed to add comment:", error);
+      } finally {
+          setIsSubmittingComment(false);
+      }
+  };
+
+  const handleCommentImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+
+      try {
+          setIsUploadingCommentImage(true);
+          const url = await handleFileUpload(file);
+          setCommentImage(url);
+      } catch (error) {
+          console.error("Failed to upload comment image:", error);
+          alert("Failed to upload image. Please try again.");
+      } finally {
+          setIsUploadingCommentImage(false);
+          if (fileInputRef.current) {
+              fileInputRef.current.value = '';
+          }
+      }
+  };
+
+  const handleAddTag = async (e?: React.FormEvent, tagValue?: string) => {
+      if (e) e.preventDefault();
+      const value = tagValue || newTag;
+      if (!value.trim() || formData.tags.includes(value.trim())) return;
+      
+      await updateProperty({ tags: [...formData.tags, value.trim()] });
+      setNewTag('');
+      setIsAddingTag(false);
+  };
+
+  const handleRemoveTag = async (tagToRemove: string) => {
+      await updateProperty({ tags: formData.tags.filter(t => t !== tagToRemove) });
+  };
   
   const getPriorityColor = (p: Priority) => { 
       switch (p) {
@@ -789,6 +925,9 @@ export const WorkspaceModal: React.FC<WorkspaceModalProps> = ({
       return 'bg-gray-100 text-gray-500 border-gray-200';
   };
   const filteredUsers = users.filter(u => u.name.toLowerCase().includes(assigneeSearch.toLowerCase()) || u.role.toLowerCase().includes(assigneeSearch.toLowerCase()));
+  const filteredCollaborators = users.filter(u => u.name.toLowerCase().includes(collaboratorSearch.toLowerCase()) || u.role.toLowerCase().includes(collaboratorSearch.toLowerCase()));
+
+  const activeCollaborators = isCollaboratorsOpen && draftCollaborators !== null ? draftCollaborators : (formData.collaborators || []);
 
   const renderSingleField = (field: FieldDefinition, config: any, val: any, isEditable: boolean, parentKey?: string) => {
       // ... (Implementation preserved) ...
@@ -1122,8 +1261,8 @@ export const WorkspaceModal: React.FC<WorkspaceModalProps> = ({
            <div className="px-6 py-4 flex justify-between items-start">
                <div>
                   <div className="flex items-center gap-3 mb-1">
-                      <span className="text-gray-400 text-xs font-mono bg-gray-50 px-1.5 py-0.5 rounded border border-gray-100">{task.id}</span>
-                      <h2 className="text-xl font-bold text-gray-900">{task.identity.productName}</h2>
+                      <span className="text-gray-400 text-xs font-mono bg-gray-50 px-1.5 py-0.5 rounded border border-gray-100">{formData.id}</span>
+                      <h2 className="text-xl font-bold text-gray-900">{formData.identity.productName}</h2>
                       
                       {/* LINKED PRODUCT BADGE - READ ONLY */}
                       {linkedProduct ? (
@@ -1161,8 +1300,8 @@ export const WorkspaceModal: React.FC<WorkspaceModalProps> = ({
                   </div>
                   {/* ... Rest of Header ... */}
                   <div className="text-sm text-gray-500 flex items-center gap-4">
-                      <span>SKU: <span className="font-mono text-gray-700">{task.identity.sku}</span></span>
-                      <span>Brand: <span className="text-gray-700">{task.identity.brand || '-'}</span></span>
+                      <span>SKU: <span className="font-mono text-gray-700">{formData.identity.sku}</span></span>
+                      <span>Brand: <span className="text-gray-700">{formData.identity.brand || '-'}</span></span>
                   </div>
                </div>
                <div className="flex items-center gap-2">
@@ -1202,14 +1341,14 @@ export const WorkspaceModal: React.FC<WorkspaceModalProps> = ({
                        ) : (
                            <div className="relative">
                                <select 
-                                  className={`appearance-none font-bold text-sm pr-6 pl-2 py-1 rounded w-full cursor-pointer outline-none border transition-colors ${getStatusColor(task.workStatus)}`}
-                                  value={task.workStatus}
+                                  className={`appearance-none font-bold text-sm pr-6 pl-2 py-1 rounded w-full cursor-pointer outline-none border transition-colors ${getStatusColor(formData.workStatus)}`}
+                                  value={formData.workStatus}
                                   onChange={(e) => handleStatusChange(e.target.value as WorkStatus)}
                                   disabled={!canEditContent} // Status accessible to regular editors
                                 >
                                    <option value="not_started">{t.status_not_started}</option>
                                    <option value="in_progress">{t.status_in_progress}</option>
-                                   {task.workStatus === 'completed' && <option value="completed">{t.status_completed}</option>}
+                                   {formData.workStatus === 'completed' && <option value="completed">{t.status_completed}</option>}
                                </select>
                                <div className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none opacity-50"><ChevronDown size={12}/></div>
                            </div>
@@ -1228,9 +1367,9 @@ export const WorkspaceModal: React.FC<WorkspaceModalProps> = ({
                       disabled={!canEditCore}
                       className={`flex items-center gap-2 bg-white border border-transparent rounded px-2 py-1 transition-all text-left ${canEditCore ? 'hover:bg-gray-50 hover:border-gray-200' : 'cursor-default'}`}
                    >
-                       <img src={task.owner.avatar || undefined} className="w-5 h-5 rounded-full border border-gray-200" />
+                       <img src={formData.owner.avatar || undefined} className="w-5 h-5 rounded-full border border-gray-200" />
                        <div className="flex-1 overflow-hidden">
-                           <div className="text-sm font-bold text-gray-800 truncate">{task.owner.name}</div>
+                           <div className="text-sm font-bold text-gray-800 truncate">{formData.owner.name}</div>
                        </div>
                        {canEditCore && <ChevronDown size={12} className="text-gray-400" />}
                    </button>
@@ -1248,12 +1387,89 @@ export const WorkspaceModal: React.FC<WorkspaceModalProps> = ({
                            </div>
                            <div className="max-h-48 overflow-y-auto">
                                {filteredUsers.map(user => (
-                                   <button key={user.id} onClick={() => { updateProperty({ owner: user }); setIsAssigneeOpen(false); }} className={`w-full text-left px-3 py-2 flex items-center gap-3 hover:bg-indigo-50 transition-colors ${user.id === task.owner.id ? 'bg-indigo-50/50' : ''}`}>
+                                   <button key={user.id} onClick={() => { updateProperty({ owner: user }); setIsAssigneeOpen(false); }} className={`w-full text-left px-3 py-2 flex items-center gap-3 hover:bg-indigo-50 transition-colors ${user.id === formData.owner.id ? 'bg-indigo-50/50' : ''}`}>
                                        <img src={user.avatar || undefined} className="w-6 h-6 rounded-full border border-gray-200" />
                                        <div className="flex-1"><div className="text-sm font-medium text-gray-900">{user.name}</div><div className="text-xs text-gray-500">{user.role}</div></div>
-                                       {user.id === task.owner.id && <CheckCircle size={14} className="text-indigo-600"/>}
+                                       {user.id === formData.owner.id && <CheckCircle size={14} className="text-indigo-600"/>}
                                    </button>
                                ))}
+                           </div>
+                       </div>
+                   )}
+               </div>
+
+               {/* 2.5 Collaborators */}
+               <div className="flex flex-col gap-1 min-w-[150px] relative">
+                   <div className="flex items-center text-xs text-gray-400 font-medium uppercase tracking-wider">
+                       <UserIcon size={12} className="mr-1.5"/> {language === 'cn' ? '协作者' : 'Collaborators'}
+                   </div>
+                   <button 
+                      ref={collaboratorsButtonRef}
+                      onClick={toggleCollaboratorsMenu}
+                      disabled={!canEditCore}
+                      className={`flex items-center gap-2 bg-white border border-transparent rounded px-2 py-1 transition-all text-left ${canEditCore ? 'hover:bg-gray-50 hover:border-gray-200' : 'cursor-default'}`}
+                   >
+                       <div className="flex -space-x-2 overflow-hidden">
+                           {activeCollaborators.length > 0 ? (
+                               activeCollaborators.slice(0, 3).map(collabId => {
+                                   const user = users.find(u => u.id === collabId);
+                                   return user ? (
+                                       <img key={collabId} src={user.avatar || undefined} className="inline-block w-5 h-5 rounded-full ring-2 ring-white" title={user.name} />
+                                   ) : null;
+                               })
+                           ) : (
+                               <div className="w-5 h-5 rounded-full bg-gray-100 border border-gray-200 flex items-center justify-center text-gray-400 text-[10px]">
+                                   <UserIcon size={10} />
+                               </div>
+                           )}
+                           {activeCollaborators.length > 3 && (
+                               <div className="w-5 h-5 rounded-full bg-gray-100 border border-gray-200 flex items-center justify-center text-gray-500 text-[10px] font-medium ring-2 ring-white">
+                                   +{activeCollaborators.length - 3}
+                               </div>
+                           )}
+                       </div>
+                       <div className="flex-1 overflow-hidden">
+                           <div className="text-sm font-medium text-gray-600 truncate">
+                               {activeCollaborators.length > 0 
+                                   ? `${activeCollaborators.length} ${language === 'cn' ? '人' : 'users'}` 
+                                   : (language === 'cn' ? '添加' : 'Add')}
+                           </div>
+                       </div>
+                       {canEditCore && <ChevronDown size={12} className="text-gray-400" />}
+                   </button>
+                   {isCollaboratorsOpen && canEditCore && (
+                       <div 
+                         id="collaborators-popover-menu"
+                         className="absolute top-[100%] left-0 mt-1 w-64 bg-white rounded-lg shadow-2xl border border-gray-200 overflow-hidden animate-fade-in-up z-50"
+                       >
+                           <div className="p-2 border-b border-gray-100 bg-gray-50">
+                               <div className="relative">
+                                   <Search size={14} className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400"/>
+                                   <input autoFocus className="w-full pl-8 pr-2 py-1.5 text-sm border border-gray-200 rounded focus:ring-1 focus:ring-indigo-500 outline-none" placeholder={t.search_users} value={collaboratorSearch} onChange={(e) => setCollaboratorSearch(e.target.value)} />
+                               </div>
+                           </div>
+                           <div className="max-h-48 overflow-y-auto">
+                               {filteredCollaborators.map(user => {
+                                   const isSelected = activeCollaborators.includes(user.id);
+                                   return (
+                                       <button 
+                                           key={user.id} 
+                                           onClick={() => { 
+                                               const current = draftCollaborators || [];
+                                               const newCollaborators = isSelected 
+                                                   ? current.filter(id => id !== user.id)
+                                                   : [...current, user.id];
+                                               setDraftCollaborators(newCollaborators);
+                                               draftRef.current = newCollaborators;
+                                           }} 
+                                           className={`w-full text-left px-3 py-2 flex items-center gap-3 hover:bg-indigo-50 transition-colors ${isSelected ? 'bg-indigo-50/50' : ''}`}
+                                       >
+                                           <img src={user.avatar || undefined} className="w-6 h-6 rounded-full border border-gray-200" />
+                                           <div className="flex-1"><div className="text-sm font-medium text-gray-900">{user.name}</div><div className="text-xs text-gray-500">{user.role}</div></div>
+                                           {isSelected && <CheckCircle size={14} className="text-indigo-600"/>}
+                                       </button>
+                                   );
+                               })}
                            </div>
                        </div>
                    )}
@@ -1269,7 +1485,7 @@ export const WorkspaceModal: React.FC<WorkspaceModalProps> = ({
                            type="date" 
                            disabled={!canEditCore}
                            className="bg-transparent border-b border-transparent hover:border-gray-300 focus:border-indigo-500 outline-none w-[85px] text-xs cursor-pointer disabled:opacity-70 disabled:cursor-not-allowed"
-                           value={task.startDate ? format(new Date(task.startDate), 'yyyy-MM-dd') : ''}
+                           value={formData.startDate ? format(new Date(formData.startDate), 'yyyy-MM-dd') : ''}
                            onChange={(e) => updateProperty({ startDate: e.target.value ? new Date(new Date(e.target.value).setHours(0,0,0,0)) : undefined })}
                        />
                        <span className="text-gray-400">→</span>
@@ -1277,7 +1493,7 @@ export const WorkspaceModal: React.FC<WorkspaceModalProps> = ({
                            type="date" 
                            disabled={!canEditCore}
                            className="bg-transparent border-b border-transparent hover:border-gray-300 focus:border-indigo-500 outline-none w-[85px] text-xs cursor-pointer text-red-600 font-medium disabled:opacity-70 disabled:cursor-not-allowed"
-                           value={task.deadline ? format(new Date(task.deadline), 'yyyy-MM-dd') : ''}
+                           value={formData.deadline ? format(new Date(formData.deadline), 'yyyy-MM-dd') : ''}
                            onChange={(e) => updateProperty({ deadline: e.target.value ? endOfDay(new Date(e.target.value)) : endOfDay(new Date()) })}
                        />
                    </div>
@@ -1290,8 +1506,8 @@ export const WorkspaceModal: React.FC<WorkspaceModalProps> = ({
                    </div>
                    <div className="relative">
                        <select 
-                           className={`appearance-none bg-transparent font-bold text-sm pr-4 cursor-pointer outline-none disabled:opacity-70 disabled:cursor-not-allowed ${getPriorityColor(task.priority)}`} 
-                           value={task.priority} 
+                           className={`appearance-none bg-transparent font-bold text-sm pr-4 cursor-pointer outline-none disabled:opacity-70 disabled:cursor-not-allowed ${getPriorityColor(formData.priority)}`} 
+                           value={formData.priority} 
                            onChange={(e) => updateProperty({ priority: e.target.value as Priority })}
                            disabled={!canEditCore}
                        >
@@ -1305,28 +1521,28 @@ export const WorkspaceModal: React.FC<WorkspaceModalProps> = ({
                {/* Difficulty & Hours - RESTRICTED TO CORE */}
                <div className="flex flex-col gap-1 min-w-[100px]">
                    <div className="flex items-center text-xs text-gray-400 font-medium uppercase tracking-wider">
-                       <AlertCircle size={12} className="mr-1.5"/> Difficulty
+                       <AlertCircle size={12} className="mr-1.5"/> {t.taskDifficulty || 'Difficulty'}
                    </div>
                    <select 
                        className="appearance-none bg-transparent font-bold text-sm pr-4 cursor-pointer outline-none text-gray-700 disabled:opacity-70 disabled:cursor-not-allowed" 
-                       value={task.difficulty || 'Medium'} 
+                       value={formData.difficulty || 'Medium'} 
                        onChange={(e) => updateProperty({ difficulty: e.target.value as TaskDifficulty })}
                        disabled={!canEditCore}
                    >
-                       <option value="High">High</option>
-                       <option value="Medium">Medium</option>
-                       <option value="Low">Low</option>
+                       <option value="High">{t.high || 'High'}</option>
+                       <option value="Medium">{t.medium || 'Medium'}</option>
+                       <option value="Low">{t.low || 'Low'}</option>
                    </select>
                </div>
 
                <div className="flex flex-col gap-1 min-w-[80px]">
                    <div className="flex items-center text-xs text-gray-400 font-medium uppercase tracking-wider">
-                       <Clock size={12} className="mr-1.5"/> Est. Hours
+                       <Clock size={12} className="mr-1.5"/> {t.taskEstHours || 'Est. Hours'}
                    </div>
                    <input 
                        type="number"
                        className="w-16 bg-transparent font-bold text-sm outline-none border-b border-transparent focus:border-indigo-500 text-gray-700 disabled:opacity-70 disabled:cursor-not-allowed"
-                       value={task.estimatedHours || 0}
+                       value={formData.estimatedHours || 0}
                        onChange={(e) => updateProperty({ estimatedHours: parseInt(e.target.value) || 0 })}
                        disabled={!canEditCore}
                    />
@@ -1335,10 +1551,10 @@ export const WorkspaceModal: React.FC<WorkspaceModalProps> = ({
                {/* NEW: Product Level (Read Only) */}
                <div className="flex flex-col gap-1 min-w-[80px]">
                    <div className="flex items-center text-xs text-gray-400 font-medium uppercase tracking-wider">
-                       <Star size={12} className="mr-1.5"/> Level
+                       <Star size={12} className="mr-1.5"/> {t.productLevelLabel || 'Level'}
                    </div>
-                   <div className={`text-sm font-bold ${task.productLevel === 'S' ? 'text-purple-600' : task.productLevel === 'A' ? 'text-blue-600' : 'text-gray-600'}`}>
-                       {task.productLevel || 'B'}
+                   <div className={`text-sm font-bold ${formData.productLevel === 'S' ? 'text-purple-600' : formData.productLevel === 'A' ? 'text-blue-600' : 'text-gray-600'}`}>
+                       {formData.productLevel || 'B'}
                    </div>
                </div>
 
@@ -1348,7 +1564,7 @@ export const WorkspaceModal: React.FC<WorkspaceModalProps> = ({
                        <Tag size={12} className="mr-1.5"/> {t.tags}
                    </div>
                    <div className="flex flex-wrap gap-1">
-                       {(task.tags || []).map((tag: string, i: number) => (
+                       {(formData.tags || []).map((tag: string, i: number) => (
                            <span key={i} className="px-1.5 py-0.5 bg-indigo-50 text-indigo-600 border border-indigo-100 rounded text-[10px] flex items-center">
                                {tag}
                                {canEditCore && <button onClick={() => handleRemoveTag(tag)} className="ml-1 text-indigo-400 hover:text-red-500"><X size={10}/></button>}
@@ -1419,7 +1635,7 @@ export const WorkspaceModal: React.FC<WorkspaceModalProps> = ({
                              </button>
                         )}
                         {/* Archive Button in Modal - Show if Workflow is complete OR Task status is completed */}
-                        {onArchiveTask && (task.workStatus === 'completed' || isLastStage) && (
+                        {onArchiveTask && (formData.workStatus === 'completed' || isLastStage) && (
                              <button onClick={handleArchive} disabled={isArchiving} className="flex items-center text-gray-500 hover:text-indigo-600 px-3 py-2 rounded-lg hover:bg-indigo-50 transition-colors">
                                  {isArchiving ? <Loader2 className="animate-spin mr-2" size={18}/> : <Archive className="mr-2" size={18}/>}
                                  {t.archive}
@@ -1437,14 +1653,14 @@ export const WorkspaceModal: React.FC<WorkspaceModalProps> = ({
                                             ? 'text-amber-600 bg-amber-50 hover:bg-amber-100'
                                             : 'text-gray-500 hover:text-indigo-600 hover:bg-indigo-50'
                                 }`}
-                                title="External Data Collection"
+                                title={t.externalDataCollection || "External Data Collection"}
                             >
                                 {formData.shareLinks?.find(l => l.stageId === activeStageId && l.status === 'completed') ? (
-                                    <><CheckCircle className="mr-2" size={18}/> Data Received</>
+                                    <><CheckCircle className="mr-2" size={18}/> {t.dataReceived || 'Data Received'}</>
                                 ) : formData.shareLinks?.find(l => l.stageId === activeStageId && l.status === 'pending') ? (
-                                    <><Clock className="mr-2" size={18}/> Waiting for Data</>
+                                    <><Clock className="mr-2" size={18}/> {t.waitingForData || 'Waiting for Data'}</>
                                 ) : (
-                                    <><LinkIcon className="mr-2" size={18}/> Request Data</>
+                                    <><LinkIcon className="mr-2" size={18}/> {t.requestData || 'Request Data'}</>
                                 )}
                             </button>
                         )}
@@ -1496,23 +1712,39 @@ export const WorkspaceModal: React.FC<WorkspaceModalProps> = ({
                 </div>
             </div>
 
-            {/* RIGHT: Chat & Timeline (No Changes) */}
+            {/* RIGHT: Chat & Timeline */}
             <div className="w-[350px] bg-white flex flex-col shrink-0 border-l border-gray-200">
-                {/* ... (Existing Chat & Timeline Code) ... */}
-                <div className="p-4 border-b border-gray-100 bg-gray-50/50">
-                    <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider flex items-center">
-                        <Clock size={12} className="mr-1.5"/> {t.activityLog}
-                    </h3>
+                <div className="flex border-b border-gray-100 bg-gray-50/50">
+                    <button 
+                        className={`flex-1 py-3 text-xs font-bold uppercase tracking-wider flex items-center justify-center transition-colors ${activeRightTab === 'comments' ? 'text-indigo-600 border-b-2 border-indigo-600 bg-white' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'}`}
+                        onClick={() => setActiveRightTab('comments')}
+                    >
+                        <MessageSquare size={14} className="mr-1.5"/> {t.commented || 'Comments'}
+                    </button>
+                    <button 
+                        className={`flex-1 py-3 text-xs font-bold uppercase tracking-wider flex items-center justify-center transition-colors ${activeRightTab === 'activity' ? 'text-indigo-600 border-b-2 border-indigo-600 bg-white' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'}`}
+                        onClick={() => setActiveRightTab('activity')}
+                    >
+                        <Clock size={14} className="mr-1.5"/> {t.activityLog}
+                    </button>
                 </div>
+
                 <div className="flex-1 overflow-y-auto p-4 space-y-6 custom-scrollbar">
-                    {task.timeline.map((event: TimelineEvent, idx: number) => (
+                    {formData.timeline
+                        .filter(event => activeRightTab === 'activity' || event.type === 'comment')
+                        .map((event: TimelineEvent, idx: number, arr: TimelineEvent[]) => (
                         <div key={event.id} className="relative pl-6 pb-2 last:pb-0">
-                            {idx !== task.timeline.length - 1 && <div className="absolute left-2.5 top-6 bottom-[-24px] w-0.5 bg-gray-200"></div>}
-                            <div className={`absolute left-0 top-1 w-5 h-5 rounded-full border-2 flex items-center justify-center bg-white ${event.isAlert ? 'border-red-500 text-red-500' : 'border-indigo-500 text-indigo-500'}`}>
-                                <div className={`w-2 h-2 rounded-full ${idx === 0 ? 'bg-indigo-500' : 'bg-gray-300'}`}></div>
+                            {idx !== arr.length - 1 && <div className="absolute left-2.5 top-6 bottom-[-24px] w-0.5 bg-gray-200"></div>}
+                            <div className={`absolute left-0 top-1 w-5 h-5 rounded-full border-2 flex items-center justify-center bg-white ${event.isAlert ? 'border-red-500 text-red-500' : event.type === 'comment' ? 'border-green-500 text-green-500' : 'border-indigo-500 text-indigo-500'}`}>
+                                <div className={`w-2 h-2 rounded-full ${idx === 0 ? (event.type === 'comment' ? 'bg-green-500' : 'bg-indigo-500') : 'bg-gray-300'}`}></div>
                             </div>
                             <div>
                                 <div className="text-sm font-semibold text-gray-800 leading-tight">{event.action}</div>
+                                {event.imageUrl && (
+                                    <div className="mt-2 rounded-lg overflow-hidden border border-gray-200 max-w-[250px]">
+                                        <img src={event.imageUrl} alt="Comment attachment" className="w-full h-auto object-cover" />
+                                    </div>
+                                )}
                                 <div className="flex items-center mt-1 text-xs text-gray-500">
                                     <span className="mr-2">{format(new Date(event.timestamp), 'MM/dd HH:mm')}</span>
                                     <div className="flex items-center gap-1.5">
@@ -1525,14 +1757,67 @@ export const WorkspaceModal: React.FC<WorkspaceModalProps> = ({
                     ))}
                     <div ref={chatEndRef} />
                 </div>
-                 <form onSubmit={handleAddComment} className="p-3 border-t border-gray-100">
-                    <div className="relative">
-                        <input type="text" placeholder={t.commentPlaceholder} className="w-full bg-gray-100 border-transparent rounded-lg pl-3 pr-10 py-2 text-sm focus:bg-white focus:border-indigo-300 focus:ring-0 transition-all" value={commentText} onChange={(e) => setCommentText(e.target.value)} />
-                        <button type="submit" disabled={!commentText.trim()} className="absolute right-2 top-2 text-indigo-500 hover:text-indigo-700 disabled:opacity-50">
-                            <Send size={16} />
-                        </button>
-                    </div>
-                </form>
+                
+                {activeRightTab === 'comments' && (
+                    <form onSubmit={handleAddComment} className="p-3 border-t border-gray-100 bg-white">
+                        {commentImage && (
+                            <div className="mb-2 relative inline-block">
+                                <img src={commentImage} alt="Preview" className="h-16 w-16 object-cover rounded-md border border-gray-200" />
+                                <button 
+                                    type="button" 
+                                    onClick={() => setCommentImage(null)}
+                                    className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-0.5 shadow-sm hover:bg-red-600"
+                                >
+                                    <X size={12} />
+                                </button>
+                            </div>
+                        )}
+                        <div className="relative border border-gray-200 rounded-xl overflow-hidden focus-within:border-indigo-500 focus-within:ring-1 focus-within:ring-indigo-500 transition-all shadow-sm">
+                            <textarea 
+                                placeholder={t.commentPlaceholder} 
+                                className="w-full bg-transparent border-none resize-none p-3 text-sm focus:ring-0 min-h-[80px] focus:min-h-[120px] max-h-[200px] transition-all duration-200 disabled:bg-gray-50 disabled:text-gray-400" 
+                                value={commentText} 
+                                onChange={(e) => setCommentText(e.target.value)}
+                                disabled={isSubmittingComment || isUploadingCommentImage}
+                                onKeyDown={(e) => {
+                                    if (e.key === 'Enter' && !e.shiftKey) {
+                                        e.preventDefault();
+                                        handleAddComment();
+                                    }
+                                }}
+                            />
+                            <div className="flex justify-between items-center bg-gray-50 px-3 py-2 border-t border-gray-100">
+                                <div>
+                                    <input 
+                                        type="file" 
+                                        accept="image/*" 
+                                        className="hidden" 
+                                        ref={fileInputRef}
+                                        onChange={handleCommentImageUpload}
+                                        disabled={isSubmittingComment || isUploadingCommentImage}
+                                    />
+                                    <button 
+                                        type="button" 
+                                        onClick={() => fileInputRef.current?.click()}
+                                        disabled={isSubmittingComment || isUploadingCommentImage}
+                                        className="text-gray-400 hover:text-indigo-600 transition-colors p-1.5 rounded-md hover:bg-indigo-50 disabled:opacity-50"
+                                        title="Attach Image"
+                                    >
+                                        {isUploadingCommentImage ? <Loader2 size={16} className="animate-spin" /> : <ImageIcon size={16} />}
+                                    </button>
+                                </div>
+                                <button 
+                                    type="submit" 
+                                    disabled={(!commentText.trim() && !commentImage) || isUploadingCommentImage || isSubmittingComment} 
+                                    className="bg-indigo-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5 transition-colors"
+                                >
+                                    {isSubmittingComment ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />} 
+                                    {isSubmittingComment ? (language === 'cn' ? '发送中...' : 'Sending...') : (language === 'cn' ? '发送' : 'Send')}
+                                </button>
+                            </div>
+                        </div>
+                    </form>
+                )}
             </div>
         </div>
         
@@ -1557,7 +1842,7 @@ export const WorkspaceModal: React.FC<WorkspaceModalProps> = ({
             onClose={() => setShowArchiveConfirm(false)}
             onConfirm={handleConfirmArchive}
             language={language}
-            taskName={task.identity.productName}
+            taskName={formData.identity.productName}
             isArchiving={isArchiving}
         />
 

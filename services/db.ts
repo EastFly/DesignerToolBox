@@ -35,28 +35,14 @@ class DatabaseService {
     }
   }
 
-  async getModelUsageStats(): Promise<any[]> {
+  async getModelUsageStats(days: number = 7): Promise<any> {
     try {
-      const { data: usageData, error: usageError } = await supabase.from(TABLE_MODEL_USAGE)
-        .select('*')
-        .order('created_at', { ascending: false });
-
-      if (usageError) throw usageError;
-
-      const { data: profilesData, error: profilesError } = await supabase.from('profiles')
-        .select('id, email, full_name');
-        
-      if (profilesError) throw profilesError;
-
-      const profilesMap = new Map((profilesData || []).map(p => [p.id, p]));
-
-      return (usageData || []).map(usage => ({
-        ...usage,
-        profiles: profilesMap.get(usage.user_id) || null
-      }));
+      const { data, error } = await supabase.rpc('get_model_usage_stats', { days });
+      if (error) throw error;
+      return data;
     } catch (err) {
       console.error('Failed to fetch model usage stats:', err);
-      return [];
+      throw err;
     }
   }
 
@@ -544,6 +530,15 @@ class DatabaseService {
   async deleteRole(roleId: string): Promise<void> {
       const { error } = await supabase.from(TABLE_ROLES).delete().eq('id', roleId);
       if (error) throw error;
+  }
+
+  async getTask(id: string): Promise<Task | null> {
+    try {
+      const { data, error } = await supabase.from(TABLE_TASKS).select('*').eq('id', id).single();
+      if (error) throw error;
+      if (!data) return null;
+      return this.hydrateTask(data.content, data.lifecycle_status);
+    } catch (e) { return null; }
   }
 
   async getTasks(): Promise<Task[]> {

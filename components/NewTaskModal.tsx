@@ -570,36 +570,36 @@ export const NewTaskModal: React.FC<NewTaskModalProps> = ({
 
                 {/* --- VALUE ATTRIBUTES SECTION (NEW) --- */}
                 <div className="mb-8 bg-gray-50 p-4 rounded-xl border border-gray-100">
-                    <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-4">Task Value Attributes</h4>
+                    <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-4">{t.taskValueAttributes || 'Task Value Attributes'}</h4>
                     <div className="grid grid-cols-3 gap-4">
                         <div>
                             <label className="block text-xs font-bold text-gray-700 mb-1 flex items-center gap-1">
-                                <Star size={12}/> Product Level (Cached)
+                                <Star size={12}/> {t.productLevelCached || 'Product Level (Cached)'}
                             </label>
                             <input 
                                 className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm bg-gray-100 text-gray-600 cursor-not-allowed"
                                 value={formState.productLevel || 'B'}
                                 disabled
-                                title="Inherited from Product Master"
+                                title={t.inheritedFromProductMaster || 'Inherited from Product Master'}
                             />
                         </div>
                         <div>
                             <label className="block text-xs font-bold text-gray-700 mb-1 flex items-center gap-1">
-                                <AlertCircle size={12}/> Difficulty
+                                <AlertCircle size={12}/> {t.taskDifficulty || 'Difficulty'}
                             </label>
                             <select 
                                 className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
                                 value={formState.difficulty}
                                 onChange={e => setFormState({...formState, difficulty: e.target.value})}
                             >
-                                <option value="High">High (x1.2)</option>
-                                <option value="Medium">Medium (x1.0)</option>
-                                <option value="Low">Low (x0.8)</option>
+                                <option value="High">{t.highDifficulty || 'High (x1.2)'}</option>
+                                <option value="Medium">{t.mediumDifficulty || 'Medium (x1.0)'}</option>
+                                <option value="Low">{t.lowDifficulty || 'Low (x0.8)'}</option>
                             </select>
                         </div>
                         <div>
                             <label className="block text-xs font-bold text-gray-700 mb-1 flex items-center gap-1">
-                                <Clock size={12}/> Est. Hours
+                                <Clock size={12}/> {t.taskEstHours || 'Est. Hours'}
                             </label>
                             <input 
                                 type="number"
@@ -614,9 +614,9 @@ export const NewTaskModal: React.FC<NewTaskModalProps> = ({
 
                 <div className="space-y-6 grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div className="col-span-2 text-sm font-bold text-gray-500 uppercase tracking-wider mb-2 border-b pb-2 flex justify-between items-center">
-                        <span>Creation Fields</span>
+                        <span>{t.creationFields || 'Creation Fields'}</span>
                         <span className="text-xs text-indigo-500 font-normal normal-case bg-indigo-50 px-2 py-0.5 rounded">
-                            Configured in Settings &gt; Task Types &gt; Creation Form
+                            {t.configuredInSettings || 'Configured in Settings > Task Types > Creation Form'}
                         </span>
                     </div>
                     {visibleFields.map(field => {
